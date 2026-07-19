@@ -1,0 +1,7 @@
+[server]
+# static/ 폴더를 app/static/<파일> 경로로 서빙한다 (PLAN §7, Raman app.py:140-156 과 동일).
+# 배경·로고를 base64 로 CSS 에 인라인하면 브라우저가 캐시할 수 없다. 정적 URL 이면
+# 최초 1회만 내려받고 이후 캐시된다.
+#   liquid_bg.png 8.9MB -> base64 인라인 11.87MB  ==>  static/liquid_bg.jpg 117KB, 인라인 0B
+# V17(minCachedMessageSize=10000) 상 인라인 CSS 는 첫 로드만 문제이나, 첫 로드가 곧 체감 속도다.
+enableStaticServing = true

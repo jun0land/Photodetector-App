@@ -1,0 +1,7 @@
+streamlit==1.59.2
+plotly==6.9.0
+pandas
+numpy
+xlrd
+openpyxl
+pyarrow
