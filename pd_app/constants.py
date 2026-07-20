@@ -61,13 +61,6 @@ DEFAULT_TRACE_COLORS = {
 FALLBACK_CYCLE = ["#000000", "#FF0000", "#0000FF", "#00A000", "#FF00FF",
                   "#FF8000", "#008080", "#8000FF", "#808000", "#4169E1"]
 
-MARKUP_HELP = (
-    "서식: `^{2}` 위첨자 · `_{ph}` 아래첨자 · `**굵게**` · `*기울임*` · `{#FF0000|색}` · "
-    "겹쳐쓰기 `{#C00000|**J**_{ph}}` · 이스케이프 `\\*` `\\_` `\\^` `\\{`. "
-    "위/아래첨자는 **중괄호가 필수**입니다 (`cm^{2}`, `H_{2}O`). "
-    "중괄호 없는 `^` `_` 는 그대로 표시됩니다."
-)
-
 # SPEC C1: Pretendard / Myriad Pro 는 앱 자체 디자인 폰트라 목록 맨 앞
 FONT_FAMILIES = ["Myriad Pro", "Pretendard", "Arial", "Times New Roman",
                  "Calibri", "Helvetica", "Courier New"]
