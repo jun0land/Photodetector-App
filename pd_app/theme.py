@@ -394,7 +394,7 @@ _MANUAL_JS = r"""
     <div id="pd-manual-backdrop"></div>
     <div id="pd-manual-panel">
       <button id="pd-manual-close" aria-label="닫기">✕</button>
-      <h3>📖 Photodetector I-V Viewer · 사용 설명서</h3>
+      <h3>📖 Photodetector I-V Studio · 사용 설명서</h3>
       <p class="pd-sub">Keithley 측정 파일을 올리면 논문·보고서용 Origin 풍 I-V 그래프를 바로 만들 수 있습니다.</p>
 
       <h4>STEP 1 · 파일 업로드 <span class="pd-loc">· 제목 오른쪽 「＋ 파일 추가」</span></h4>

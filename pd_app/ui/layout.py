@@ -33,17 +33,61 @@ from pd_app.ui import (
 )
 
 
+@st.dialog("📖 앱 사용 설명서", width="large")
+def show_manual() -> None:
+    """확정된 파일명 매핑 규칙을 반영한 종합 사용 설명서 모달 창."""
+    st.markdown("""
+    ### 1. 기본 사용 흐름
+    1. 우측 상단의 **[＋ 파일 추가]** 버튼을 눌러 Keithley 결과 파일(`.xls`, `.xlsx`)을 업로드합니다.
+    2. 좌측 패널의 탭들을 이용해 **트레이스 서식, 축 범위, 스케일, 인셋 레전드** 등을 편집합니다.
+    3. 우측 그래프 스테이지에서 실시간 정밀 렌더링된 결과를 확인합니다.
+    
+    ### 2. 🚨 파일 이름 작성 규칙 (자동 파장 매핑)
+    장비에서 측정된 데이터 시트들을 올바른 파장 라벨로 자동 변환하려면 아래의 명확한 네이밍 규칙을 준수해야 합니다.
+    
+    * **작성 형식**: `날짜 [측정순서] #샘플명.xlsx`
+    * **규칙 핵심**: 
+      * 대괄호 `[...]` 안의 매핑 코드 글자 수는 엑셀 내 **데이터 시트 개수와 정확히 일치**해야 합니다.
+      * **`#` 문자 뒤의 샘플명은 시스템이 읽지 않고 조용히 제외**하므로, 개별 식별을 위한 자유로운 메모 공간으로 활용하시면 됩니다.
+    
+    **[대괄호 안의 코드별 파장 매핑 목록]**
+    * `d` : Dark (암전류)
+    * `1` : 365 nm  |  `2` : 405 nm  |  `3` : 470 nm  |  `4` : 530 nm
+    * `5` : 625 nm  |  `6` : 740 nm  |  `7` : 850 nm  |  `8` : 940 nm
+    
+    *예시: 암전류 측정 후 365nm, 470nm, 940nm를 순서대로 추가 측정하여 총 4개의 데이터 시트가 있는 경우*
+    $\rightarrow$ `20260720 [d138] #Device_A_Run01.xlsx` (여기서 `#Device_A_Run01` 부분은 시스템이 분석하지 않습니다.)
+    
+    ### 3. 마크업 텍스트 서식 가이드
+    축 제목이나 인셋 레이블 입력란에는 아래와 같은 리치 마크업 문법을 지원합니다.
+    * **텍스트 굵게**: `**텍스트**`
+    * **기울임꼴**: `*텍스트*`
+    * **위첨자**: `^{텍스트}` (예: `cm^{2}` $\rightarrow$ cm²)
+    * **아래첨자**: `_{텍스트}` (예: `V_{OP}` $\rightarrow$ V_OP)
+    * **글자 색상**: `{#원하는Hex색상|텍스트}` (예: `{#FF0000|적색}` $\rightarrow$ 빨간 글씨)
+    
+    ### 4. 고화질 데이터 내보내기
+    * 우측 하단의 **[성능 지표 · 내보내기]** 확장 패널을 열어 논문 및 보고서 게재용 고해상도(10×8인치 네이티브 출력) PNG 이미지 또는 대화형 HTML 파일로 영구 저장할 수 있습니다.
+    """)
+
+
 def _header() -> None:
-    """로고 + 제목 (좌) · `＋ 파일 추가` popover (우, G2/G3)."""
-    c_title, c_upload = st.columns([6, 1], vertical_alignment="center")
+    """로고 + 제목 (좌) · 사용 설명서 버튼 (중) · ＋ 파일 추가 popover (우)."""
+    # 헤더 정렬 및 공간 분할 (5:1:1 비율)
+    c_title, c_manual, c_upload = st.columns([5, 1, 1], vertical_alignment="center")
 
     with c_title:
         logo = theme.logo_url()
         img = f"<img src='{logo}' alt='logo'/>" if logo else ""
         st.html(
             f"<div class='pd-title-glass'>{img}"
-            "<h2>Photodetector I-V Viewer</h2></div>"
+            "<h2>Photodetector I-V Studio</h2></div>"
         )
+
+    with c_manual:
+        # 파일 추가 버튼과 시각적 높이 및 너비를 맞춰 정렬 배치
+        if st.button("📖 사용 설명서", use_container_width=True):
+            show_manual()
 
     with c_upload:
         with st.container(key="pd_upload"):

@@ -22,16 +22,20 @@ from pd_app.markup import apply_markup
 
 
 def rich_input(label: str, value: str, key: str, placeholder: str = "") -> str:
-    """마크업 필드 공용 위젯: 서식 툴바 입력 + 렌더 미리보기 칩. 커밋된 마크업 반환.
-
-    반환값은 항상 문자열이며, 호출부는 `settings[...] = rich_input(...)` 로 모델에 되쓴다.
-    """
+    """마크업 필드 공용 위젯: 서식 툴바 입력 + 렌더 미리보기 칩."""
     raw = rich_toolbar(value=value or "", key=key, label=label, placeholder=placeholder)
     preview = apply_markup(raw) or "&nbsp;"
-    # 렌더 미리보기 칩 (CSS 는 theme 를 건드리지 않도록 인라인으로 최소 주입)
     st.html(
         "<div style='margin-top:2px;padding:3px 9px;border-radius:7px;"
         "background:rgba(0,0,0,0.035);font-size:13px;color:#333;"
         f"min-height:20px;line-height:1.5'>{preview}</div>"
     )
     return raw
+
+def render(ctx) -> None:
+    """편집 패널 최상단에 고정 표시되는 마크업 문법 요약 안내 가이드."""
+    st.info(
+        "💡 **마크업 퀵 서식**: 위첨자 `^{x}` · 아래첨자 `_{x}` · "
+        "굵게 `**x**` · 기울임 `*x*` · 색상 `{#Hex코드|x}`",
+        icon="ℹ️"
+    )
