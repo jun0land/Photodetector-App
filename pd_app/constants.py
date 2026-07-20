@@ -120,7 +120,7 @@ DEFAULTS = {
               "dtick": 1, "minor_dtick": "D1",   # 로그 Major 1 decade · Minor 8개(D1) 고정
               "title_raw": "Current (A)", "title_standoff": None},
     },
-    "style": {"font_family": "Arial", "title_font_size": 30, "tick_font_size": 30,
+    "style": {"font_family": "Myriad Pro", "title_font_size": 30, "tick_font_size": 30,
               "line_width": 2.0, "show_markers": False, "show_grid": False},
     "insets": {
         # PLAN §4.3: 인셋 ref 가 paper -> "x domain"/"y domain" 으로 바뀌어

@@ -114,14 +114,10 @@ def _render_row(ctx, tk, tr):
 
     # 텍스트는 popover 안에 — 트레이스가 많아도 패널 높이가 O(1) 로 유지된다 (G1)
     with c_text.popover("텍스트", use_container_width=True):
-        tr["legend_raw"] = st.text_input(
-            "레전드 텍스트", value=tr["legend_raw"],
-            key=state.wkey("trace", f"{tk}.legend_raw", fid=fid),
-            help=constants.MARKUP_HELP,
+        tr["legend_raw"] = rich_input(  # 👈 st.text_input을 rich_input으로 변경
+            "레전드 텍스트", tr["legend_raw"],  # 👈 value= 제거 (파라미터 순서 맞춤)
+            key=state.wkey("trace", f"{tk}.legend_raw", fid=fid)
         )
-        # 인셋 텍스트는 [인셋] 탭(panel_inset)이 단독 소유한다 (PLAN §5.3). 여기서도
-        # 같은 inset_raw 를 렌더하면 st.tabs 가 매 run 두 위젯을 다 실행 → value= 무시
-        # (PLAN §2.3 함정2) → 필드가 서로를 덮어써 손상된다. 그래서 제거했다 (WP9).
 
 
 def render(ctx) -> None:
