@@ -69,7 +69,7 @@ MARKUP_HELP = (
 )
 
 # SPEC C1: Pretendard / Myriad Pro 는 앱 자체 디자인 폰트라 목록 맨 앞
-FONT_FAMILIES = ["Pretendard", "Myriad Pro", "Arial", "Times New Roman",
+FONT_FAMILIES = ["Myriad Pro", "Pretendard", "Arial", "Times New Roman",
                  "Calibri", "Helvetica", "Courier New"]
 DASH_OPTIONS = {"Solid": "solid", "Dash": "dash", "Dot": "dot", "DashDot": "dashdot"}
 

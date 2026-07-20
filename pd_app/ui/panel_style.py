@@ -52,12 +52,18 @@ def _fonts(ctx):
     style = ctx.settings["style"]
     fid = ctx.fid
 
-    # C1: Pretendard / Myriad Pro 포함. 기본값은 의도적으로 "Arial" (논문용) 이므로
-    # 절대 index=0 을 쓰지 말고 모델 값에서 시드한다.
-    fam = style["font_family"]
-    idx = (constants.FONT_FAMILIES.index(fam)
-           if fam in constants.FONT_FAMILIES else
-           constants.FONT_FAMILIES.index(constants.DEFAULTS["style"]["font_family"]))
+    # 👇 기존의 꼬인 인덱스 추적을 초기화하고, constants.py의 기본값(Myriad Pro)을 강제로 추적하도록 수정
+    fam = style.get("font_family", "Myriad Pro")
+    
+    # 만약 기존 캐시나 세션에 Arial이 남아있어 Myriad Pro로 강제 전환하고 싶다면 아래 주석 처리를 해제하세요
+    # if fam == "Arial": fam = "Myriad Pro"
+    
+    if fam in constants.FONT_FAMILIES:
+        idx = constants.FONT_FAMILIES.index(fam)
+    else:
+        idx = constants.FONT_FAMILIES.index("Myriad Pro")
+
+    # 변경된 인덱스로 가리키고, 선택된 값을 다시 모델(style)에 저장
     style["font_family"] = st.selectbox(
         "폰트", constants.FONT_FAMILIES, index=idx,
         key=state.wkey("style", "font_family", fid=fid),
