@@ -35,14 +35,3 @@ def rich_input(label: str, value: str, key: str, placeholder: str = "") -> str:
         f"min-height:20px;line-height:1.5'>{preview}</div>"
     )
     return raw
-
-
-def render(ctx) -> None:
-    """편집 패널 상단: 마크업 문법을 발견 가능하게 하는 조용한 힌트 스트립.
-
-    이 함수는 절대 raise 하지 않는다.
-    """
-    st.markdown(
-        f"<span class='mk-help'>{constants.MARKUP_HELP}</span>",
-        unsafe_allow_html=True,
-    )
