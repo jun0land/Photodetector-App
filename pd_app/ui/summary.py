@@ -1,7 +1,4 @@
-"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7.
-
-ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
-"""
+"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7."""
 
 from __future__ import annotations
 
@@ -253,42 +250,33 @@ def _export(ctx, metric_rows) -> None:
         # =========================================================
         # 1. 완전 투명 PNG용 데이터 조립 (그래프 안/밖 및 인셋 투명화)
         # =========================================================
-        # 임시로 인셋의 배경색 설정을 투명하게 조작하기 위해 세팅 값을 깊은 복사합니다.
         png_settings = copy.deepcopy(ctx.settings)
         if "insets" in png_settings:
             if "legend" in png_settings["insets"]:
-                # 인셋 상자의 배경색과 테두리색을 완전 투명(오퍼시티 0)으로 강제 덮어쓰기
                 png_settings["insets"]["legend"]["bg_opacity"] = 0.0
                 png_settings["insets"]["legend"]["border"] = False
             if "sample" in png_settings["insets"]:
                 png_settings["insets"]["sample"]["bg_opacity"] = 0.0
                 png_settings["insets"]["sample"]["border"] = False
                 
-        # 복사한 투명 세팅으로 figure를 새로 그립니다.
-        # (주의: figure.build_figure 내부 로직이 ctx.settings가 아니라 파라미터로 받은 세팅을 쓰도록 해야 하지만,
-        # 현재 구조상 상태(state)를 전역으로 읽을 수 있으므로 강제로 세션을 조작했다 복원합니다.)
         original_settings = copy.deepcopy(ctx.settings)
         state.S()["files"][ctx.fid]["settings"] = png_settings
         
         export_fig_png = figure.build_figure(ctx.fid, px_scale=1.0)
-        # 💡 [핵심 패치] paper(바깥쪽)와 plot(안쪽 격자판) 모두를 rgba(0,0,0,0)로 투명화합니다!
         export_fig_png.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         export_json_png = export_fig_png.to_json().replace("</script>", "<\\/script>")
 
         # =========================================================
         # 2. 불투명 흰색 JPG용 데이터 조립 (원상 복구 후 생성)
         # =========================================================
-        # 상태를 원래대로 복원합니다 (흰색 배경 및 인셋 원복)
         state.S()["files"][ctx.fid]["settings"] = original_settings
         
         export_fig_jpg = figure.build_figure(ctx.fid, px_scale=1.0)
-        # JPG는 투명을 지원하지 않으므로 모두 흰색으로 덮습니다.
         export_fig_jpg.update_layout(paper_bgcolor="white", plot_bgcolor="white")
         export_json_jpg = export_fig_jpg.to_json().replace("</script>", "<\\/script>")
         
     except Exception as e:
         st.error("내보내기 데이터 준비 중 오류가 발생했습니다.")
-        # 만약 에러가 났더라도 상태를 안전하게 원복합니다.
         state.S()["files"][ctx.fid]["settings"] = original_settings
         return
 
@@ -310,74 +298,74 @@ def _export(ctx, metric_rows) -> None:
     on_leave = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
 
     with c_png:
+        # 💡 [핵심 해결] iframe 탐색 코드를 완전 삭제! 이제 버튼 자체가 Plotly.js를 들고 직접 그려서 뽑아냅니다.
         png_html = f"""
+        <html>
+        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button id="btn-png" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
         🖼️ PNG (완전 투명) 다운로드
         </button>
         <script>
         document.getElementById('btn-png').addEventListener('click', function() {{
-            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
-            if(iframe) {{
-                var Plotly = iframe.contentWindow.Plotly;
-                var doc = iframe.contentWindow.document;
-                
-                var tempDiv = doc.createElement('div');
-                tempDiv.style.position = 'absolute';
-                tempDiv.style.left = '-9999px';
-                tempDiv.style.width = '960px';
-                tempDiv.style.height = '768px';
-                doc.body.appendChild(tempDiv);
-                
-                var figData = {export_json_png};
-                
-                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                    Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                        doc.body.removeChild(tempDiv);
-                    }});
-                }});
-            }} else {{
-                alert('그래프 렌더러를 찾을 수 없습니다.');
+            if (typeof Plotly === 'undefined') {{
+                alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
+                return;
             }}
+            var tempDiv = document.createElement('div');
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.width = '960px';
+            tempDiv.style.height = '768px';
+            document.body.appendChild(tempDiv);
+            
+            var figData = {export_json_png};
+            
+            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                    document.body.removeChild(tempDiv);
+                }});
+            }});
         }});
         </script>
         </body>
+        </html>
         """
         st.components.v1.html(png_html, height=40)
 
     with c_jpg:
+        # 💡 [핵심 해결] JPG 다운로드 버튼도 마찬가지로 완벽히 격리된 자체 엔진으로 렌더링.
         jpg_html = f"""
+        <html>
+        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button id="btn-jpg" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
         📷 JPG (흰색 배경) 다운로드
         </button>
         <script>
         document.getElementById('btn-jpg').addEventListener('click', function() {{
-            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
-            if(iframe) {{
-                var Plotly = iframe.contentWindow.Plotly;
-                var doc = iframe.contentWindow.document;
-                
-                var tempDiv = doc.createElement('div');
-                tempDiv.style.position = 'absolute';
-                tempDiv.style.left = '-9999px';
-                tempDiv.style.width = '960px';
-                tempDiv.style.height = '768px';
-                doc.body.appendChild(tempDiv);
-                
-                var figData = {export_json_jpg};
-                
-                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                    Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                        doc.body.removeChild(tempDiv);
-                    }});
-                }});
-            }} else {{
-                alert('그래프 렌더러를 찾을 수 없습니다.');
+            if (typeof Plotly === 'undefined') {{
+                alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
+                return;
             }}
+            var tempDiv = document.createElement('div');
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.width = '960px';
+            tempDiv.style.height = '768px';
+            document.body.appendChild(tempDiv);
+            
+            var figData = {export_json_jpg};
+            
+            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                    document.body.removeChild(tempDiv);
+                }});
+            }});
         }});
         </script>
         </body>
+        </html>
         """
         st.components.v1.html(jpg_html, height=40)
 
