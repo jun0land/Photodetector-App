@@ -75,7 +75,9 @@ def _color_control(ctx, tk, tr, col):
             f".st-key-pd_sw_{safe} button:hover {{filter: brightness(0.8);}}</style>"
         )
         with st.container(key=f"pd_sw_{safe}"):
-            if st.button(" ", use_container_width=True, help=f"색상: {cur_name}{trans_text} — 클릭해서 변경"):
+            # 💡 [핵심 수정] 똑같은 색상이 여러 개 있어도 에러가 나지 않도록 고유 key(btn_key)를 추가합니다!
+            btn_key = state.wkey("trace", f"{tk}.color_btn", fid=ctx.fid)
+            if st.button(" ", key=btn_key, use_container_width=True, help=f"색상: {cur_name}{trans_text} — 클릭해서 변경"):
                 _color_dialog(ctx, tk, safe)
 
 
