@@ -67,6 +67,11 @@ def logo_url() -> str | None:
 # ===========================================================================
 _CSS = f"""
 <style>
+/* 메인 화면 최상단 여백 조절 */
+.block-container, [data-testid="stMainBlockContainer"] {{
+    padding-top: 6rem !important; /* 기본값(보통 4rem~5rem)보다 숫자를 늘리면 여백이 더 생깁니다 */
+}}
+
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
 
 html, body, [class*="css"], .stApp, button, input, textarea, select {{

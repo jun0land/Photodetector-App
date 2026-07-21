@@ -28,23 +28,56 @@ def _color_name_of(hex_color):
 
 @st.dialog("🎨 색상 및 투명도 설정")
 def _color_dialog(ctx, tk, safe):
-    """팝업 꺼짐 버그를 해결한 모달 다이얼로그 형태의 색상/투명도 제어판."""
+    """팝업 꺼짐 버그를 해결한 모달 다이얼로그. 6x4 정방형 스와치 복구 및 안전한 헥스 입력."""
     fid = ctx.fid
     tr = ctx.settings["traces"][tk]
+    current_color = tr.get("color", "#000000")
 
     st.markdown("**1. Origin 24색 팔레트 (빠른 적용)**")
-    cols = st.columns(6)
+    
+    # 💡 [수정1] 6x4 배열의 30x30 정사각형 스와치를 HTML/CSS + st.button으로 완벽 복원
+    cols = st.columns(6, gap="small")
     for i, (name, hexv) in enumerate(constants.ORIGIN_COLORS.items()):
         with cols[i % 6]:
-            if st.button(" ", key=f"pal_{safe}_{name}", help=name, use_container_width=True):
+            # 버튼 텍스트를 공백으로 두고 고유 key 할당
+            if st.button(" ", key=f"pal_{safe}_{name}", help=name):
                 tr["color"] = hexv
                 st.rerun()
-            st.html(f"<style>.st-key-pal_{safe}_{name} button {{ background-color: {hexv} !important; height: 25px; min-height: 25px; padding: 0; border: 1px solid #ccc; }}</style>")
+            # CSS로 버튼 크기를 강제 30x30px 정사각형으로 고정하고 마진을 없앰
+            st.html(
+                f"<style>"
+                f".st-key-pal_{safe}_{name} button {{"
+                f"  background-color: {hexv} !important; "
+                f"  width: 30px !important; "
+                f"  height: 30px !important; "
+                f"  min-height: 30px !important; "
+                f"  padding: 0 !important; "
+                f"  border: 1px solid #d0d0d0 !important; "
+                f"  border-radius: 4px !important; "
+                f"}} "
+                f".st-key-pal_{safe}_{name} button:hover {{ border: 2px solid #000 !important; }}"
+                f"</style>"
+            )
 
     st.markdown("<br>**2. 커스텀 색상 및 투명도 조절**", unsafe_allow_html=True)
-    c_pick, c_trans = st.columns(2)
-    with c_pick:
-        temp_color = st.color_picker("Hex 색상 선택", value=tr.get("color", "#000000"), key=f"pick_{safe}")
+    c_preview, c_hex, c_trans = st.columns([1, 2, 2], vertical_alignment="bottom")
+    
+    # 💡 [수정2] 네이티브 컬러 피커 튕김 버그를 우회하는 텍스트 기반 헥스(Hex) 편집기
+    with c_preview:
+        # 현재 입력된 Hex 색상을 실시간으로 보여주는 미리보기 박스
+        st.html(
+            f"<div style='width: 40px; height: 40px; background-color: {current_color}; "
+            f"border: 1px solid #ccc; border-radius: 6px; margin-bottom: 5px; "
+            f"box-shadow: inset 0 0 4px rgba(0,0,0,0.2);'></div>"
+        )
+        
+    with c_hex:
+        # 컬러 피커 대신 Hex 코드를 직접 입력 (예: #FF5733). 
+        temp_color = st.text_input("Hex 코드 입력", value=current_color, key=f"hex_{safe}", max_chars=7)
+        # 잘못된 입력 방어 (항상 #으로 시작하도록)
+        if not temp_color.startswith("#"):
+            temp_color = "#" + temp_color.lstrip("#")
+            
     with c_trans:
         temp_trans = st.number_input(
             "투명도 (%)", min_value=0, max_value=100, 
@@ -53,11 +86,10 @@ def _color_dialog(ctx, tk, safe):
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
-    if st.button("✅ 설정 적용", type="primary", use_container_width=True):
+    if st.button("✅ 설정 적용", type="primary", use_container_width=True, key=f"apply_{safe}"):
         tr["color"] = temp_color
         tr["transparency"] = temp_trans
         st.rerun()
-
 
 def _color_control(ctx, tk, tr, col):
     """색상 컬럼: 현재 색/투명도를 반영한 버튼(다이얼로그 트리거)."""
