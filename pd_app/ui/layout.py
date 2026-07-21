@@ -189,7 +189,6 @@ def _build_ctx(fid) -> SimpleNamespace:
 def _edit_panel(ctx) -> None:
     """좌: 편집 패널. 높이는 theme 의 --pd-panel-h 가 바인딩한다 (C5: 768 금지)."""
     with st.container(key="pd_edit_panel"):
-        toolbar.render(ctx)  # 마크업 문법 힌트 스트립 (SIMPLE fallback)
         t_tr, t_ax, t_st, t_in, t_fmt = st.tabs(
             ["트레이스", "축", "서식", "인셋", "포맷"]
         )
