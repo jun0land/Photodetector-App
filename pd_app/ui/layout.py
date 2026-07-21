@@ -72,9 +72,9 @@ def show_manual() -> None:
 
 
 def _header() -> None:
-    """로고 + 제목 (좌) · 사용 설명서 버튼 (중) · ＋ 파일 추가 popover (우)."""
-    # 헤더 정렬 및 공간 분할 (5:1:1 비율)
-    c_title, c_manual, c_upload = st.columns([5, 1, 1], vertical_alignment="center")
+    """로고 + 제목 (좌) · 사용 설명서 버튼 (중) · 현재 파일 제거 (우1) · ＋ 파일 추가 popover (우2)."""
+    # 상단 헤더 우측의 세 버튼이 같은 가로 크기로 배치되도록 정렬 비율을 5:1:1:1로 조정
+    c_title, c_manual, c_del, c_upload = st.columns([5, 1, 1, 1], vertical_alignment="center")
 
     with c_title:
         logo = theme.logo_url()
@@ -85,9 +85,34 @@ def _header() -> None:
         )
 
     with c_manual:
-        # 파일 추가 버튼과 시각적 높이 및 너비를 맞춰 정렬 배치
         if st.button("📖 사용 설명서", use_container_width=True):
             show_manual()
+
+    with c_del:
+        s = state.S()
+        # 로드된 파일 목록이 있고, 활성화된 파일이 있는 상태에서만 제거 버튼 렌더링
+        if s["order"] and state.active_fid():
+            
+            def _handle_header_remove():
+                target_fid = state.active_fid()
+                if target_fid:
+                    state.remove_file(target_fid)  # 내부 데이터 삭제
+                    
+                    # 1. 탭 위젯(segmented_control) 기억 초기화
+                    if "pd_banner_sel" in st.session_state:
+                        del st.session_state["pd_banner_sel"]
+                    
+                    # 2. 파일 업로더 내 좀비 파일 재업로드 캐시 완전 리셋
+                    if "pd_file_uploader" in st.session_state:
+                        del st.session_state["pd_file_uploader"]
+
+            st.button(
+                "✕ 제거", 
+                help="현재 보고 있는 활성 파일 제거", 
+                type="secondary",
+                use_container_width=True, 
+                on_click=_handle_header_remove
+            )
 
     with c_upload:
         with st.container(key="pd_upload"):
@@ -103,6 +128,7 @@ def _header() -> None:
 
 def _ingest(uploaded) -> None:
     """업로드된 파일을 상태에 추가. sha 로 이미 있는 파일은 건너뛴다 —
+
     매 rerun 마다 uploader 가 같은 파일을 계속 돌려주므로, 그대로 add_file 을
     부르면 add_file 이 active 를 매번 그 파일로 되돌려 배너 선택이 씹힌다.
     """
@@ -128,38 +154,19 @@ def _banner() -> str | None:
     if not order:
         return None
 
-    # 👇 [추가된 부분] 화면을 다시 그리기 전에 데이터를 가장 먼저 안전하게 삭제하는 콜백 함수
-    def _handle_remove():
-        target_fid = state.active_fid()
-        if target_fid:
-            state.remove_file(target_fid)  # 내부 데이터 삭제
-            # [핵심] 위젯(segmented_control)이 물고 있던 예전 파일의 기억(캐시)을 강제로 지워줍니다!
-            if "pd_banner_sel" in st.session_state:
-                del st.session_state["pd_banner_sel"]
-            # 👇 [추가할 부분] 2. 파일 업로더에 남아있는 '좀비 파일' 기억 강제 삭제!
-            if "pd_file_uploader" in st.session_state:
-                del st.session_state["pd_file_uploader"]
-
     files = s["files"]
     with st.container(key="pd_banner"):
-        c_sel = st.columns([9, 1], vertical_alignment="center")
-        c_del = st.columns([5, 1, 1], vertical_alignment="center")
-
-        with c_sel:
-            sel = st.segmented_control(
-                "파일",
-                order,
-                format_func=lambda fid: files[fid]["name"],
-                default=state.active_fid() or order[0],
-                label_visibility="collapsed",
-                key="pd_banner_sel",
-            )
-        if sel:
-            state.set_active(sel)
-            
-        with c_del:
-            # 👇 [수정된 부분] st.rerun()을 빼고 on_click 속성을 통해 위 함수를 연결합니다.
-            st.button("🗑️ 현재 파일 제거", help="현재 파일 제거", use_container_width=True, on_click=_handle_remove)
+        # 제거 버튼이 헤더 영역으로 승격 및 대칭 이동했으므로, 리스트 깨짐 없이 온전한 가로 폭으로 탭을 그립니다.
+        sel = st.segmented_control(
+            "파일",
+            order,
+            format_func=lambda fid: files[fid]["name"],
+            default=state.active_fid() or order[0],
+            label_visibility="collapsed",
+            key="pd_banner_sel",
+        )
+    if sel:
+        state.set_active(sel)
             
     return state.active_fid()
 
@@ -221,6 +228,7 @@ def _edit_panel(ctx) -> None:
 
 def _display_scale() -> float:
     """표시 배율 s. **CSS transform 대신 figure 를 s배 네이티브 축소**해 렌더한다
+
     (라벨이 수평으로 나온다). 뷰포트 자동측정은 ResizeObserver busy 루프/rerun 루프
     위험이 커 폐기하고, 절대 안 깨지는 number_input 으로 사용자가 조절한다.
     첫 paint 기본값 0.72 (1536×695 에서 스크롤 없이 들어가는 값).
@@ -236,7 +244,9 @@ def _display_scale() -> float:
 
 def _graph_stage(ctx) -> None:
     """우: 그래프 스테이지. figure 를 px_scale 로 네이티브 축소해 렌더 (transform 없음).
-    내보내기는 summary 가 px_scale=1.0 별도 figure 로 만든다 → 정확히 960×768."""
+
+    내보내기는 summary 가 px_scale=1.0 별도 figure 로 만든다 → 정확히 960×768.
+    """
     fid = ctx.fid
     stem = str(state.S()["files"][fid]["name"]).rsplit(".", 1)[0] or "graph"
 
