@@ -22,6 +22,28 @@ from pd_app import constants, state
 from pd_app.markup import apply_markup
 
 
+# 💡 [추가됨] 연구실 표준 인셋 정렬 우선순위 (측정 순서 무관 지정 렌더링용)
+INSET_ORDER_PRIORITY = {
+    "Dark": 0,
+    "940 nm": 1,
+    "850 nm": 2,
+    "740 nm": 3,
+    "625 nm": 4,
+    "530 nm": 5,
+    "470 nm": 6,
+    "405 nm": 7,
+    "365 nm": 8
+}
+
+def _get_inset_priority(tr) -> int:
+    """트레이스 라벨을 분석하여 약속된 우선순위(0~8)를 반환. 모르는 파장이면 맨 아래(99)로."""
+    label = str(tr.get("label", "")).strip()
+    for key, priority in INSET_ORDER_PRIORITY.items():
+        if label.startswith(key):
+            return priority
+    return 99
+
+
 # ---------------- 기하 (렌더와 히트박스가 공유) ----------------
 def _row_height_px(html, font_size):
     """행 높이(px). 위/아래첨자는 줄 상자를 키우므로 행마다 따로 계산."""
@@ -44,7 +66,12 @@ def legend_rows(settings):
     트레이스 설정을 그대로 따라가므로 인셋 스와치가 곡선과 항상 일치한다.
     """
     rows = []
-    for tr in (settings.get("traces") or {}).values():
+    
+    # 💡 [추가된 로직] 트레이스들을 꺼낸 뒤, 약속된 파장 우선순위에 따라 강제 정렬합니다.
+    traces = list((settings.get("traces") or {}).values())
+    traces.sort(key=_get_inset_priority)
+
+    for tr in traces:
         if not tr.get("visible", True) or not tr.get("include_in_inset", True):
             continue
         rows.append({
