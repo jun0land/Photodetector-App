@@ -292,7 +292,7 @@ def _report_csv(ctx, metric_rows) -> bytes:
     """데이터 요약 + 성능 지표를 하나의 CSV 로. utf-8-sig 라 Excel 이 한글을 바로 연다."""
     m = _metrics_of(ctx.settings)
     buf = io.StringIO()
-    buf.write("# Photodetector I-V Viewer — report\n")
+    buf.write("# Photodetector I-V Studio — report\n")
     buf.write(f"# file,{_stem(ctx.fid)}\n")
     buf.write(f"# V_op (V),{m['v_op']}\n")
     buf.write(f"# Area,{m['area']},{m['area_unit']}\n")

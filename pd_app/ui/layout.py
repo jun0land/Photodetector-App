@@ -128,6 +128,15 @@ def _banner() -> str | None:
     if not order:
         return None
 
+    # 👇 [추가된 부분] 화면을 다시 그리기 전에 데이터를 가장 먼저 안전하게 삭제하는 콜백 함수
+    def _handle_remove():
+        target_fid = state.active_fid()
+        if target_fid:
+            state.remove_file(target_fid)  # 내부 데이터 삭제
+            # [핵심] 위젯(segmented_control)이 물고 있던 예전 파일의 기억(캐시)을 강제로 지워줍니다!
+            if "pd_banner_sel" in st.session_state:
+                del st.session_state["pd_banner_sel"]
+
     files = s["files"]
     with st.container(key="pd_banner"):
         c_sel, c_del = st.columns([9, 1], vertical_alignment="center")
@@ -142,10 +151,11 @@ def _banner() -> str | None:
             )
         if sel:
             state.set_active(sel)
+            
         with c_del:
-            if st.button("✕", help="현재 파일 제거", use_container_width=True):
-                state.remove_file(state.active_fid())
-                st.rerun()
+            # 👇 [수정된 부분] st.rerun()을 빼고 on_click 속성을 통해 위 함수를 연결합니다.
+            st.button("🗑️ 현재 파일 제거", help="현재 파일 제거", use_container_width=True, on_click=_handle_remove)
+            
     return state.active_fid()
 
 
