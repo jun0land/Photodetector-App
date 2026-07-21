@@ -298,8 +298,10 @@ def _report_csv(ctx, metric_rows) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
+# pd_app/ui/summary.py 파일 내부
+
 def _export(ctx, metric_rows) -> None:
-    """리포트 CSV 다운로드 및 캐싱된 고해상도 투명 PNG / 흰색 JPG 내보내기 패널."""
+    """리포트 CSV 다운로드 및 고해상도 이미지 내보내기 트리거 패널."""
     st.download_button(
         "📊 요약 · 지표 CSV 다운로드",
         data=_report_csv(ctx, metric_rows),
@@ -308,39 +310,128 @@ def _export(ctx, metric_rows) -> None:
         use_container_width=True
     )
 
-    # 💡 [전면 교체] HTML 다운로드를 완전히 드러내고 300dpi급 논문용 이미지 직접 추출 연동
+    # 💡 [핵심 해결] Kaleido 엔진의 MathJax 버그를 피해, 프론트엔드 Plotly JS 기능을 트리거합니다.
+    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
     c_png, c_jpg = st.columns(2)
-    sig_key = _sig(ctx)
+    
+    stem_name = _stem(ctx.fid)
 
     with c_png:
-        try:
-            # 상호 오염 방지를 위해 독립된 PNG용 피규어 빌드 및 캐싱 호출
-            fig_png = figure.build_figure(ctx.fid)
-            png_bytes = _export_png_cached(fig_png, sig_key)
-            st.download_button(
-                "🖼️ 투명 PNG 다운로드",
-                data=png_bytes,
-                file_name=f"{_stem(ctx.fid)}.png",
-                mime="image/png",
-                use_container_width=True
-            )
-        except Exception as exc:
-            st.button("🖼️ PNG 생성 준비 중...", disabled=True, use_container_width=True, help=str(exc))
+        # Plotly.downloadImage 를 강제로 실행시키는 JS 주입 버튼
+        png_btn = f"""
+        <button onclick="
+            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
+            if(iframe) {{
+                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
+                if(plotlyDiv) {{
+                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }} else {{
+                // Fallback for native plot
+                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+                if(plots.length > 0) {{
+                    var Plotly = window.parent.Plotly;
+                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }}
+        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
+        🖼️ PNG (투명 배경) 다운로드
+        </button>
+        """
+        st.components.v1.html(png_btn, height=45)
 
     with c_jpg:
-        try:
-            # 상호 오염 방지를 위해 독립된 JPG용 피규어 빌드 및 캐싱 호출
-            fig_jpg = figure.build_figure(ctx.fid)
-            jpg_bytes = _export_jpg_cached(fig_jpg, sig_key)
-            st.download_button(
-                "📷 흰색 JPG 다운로드",
-                data=jpg_bytes,
-                file_name=f"{_stem(ctx.fid)}.jpg",
-                mime="image/jpeg",
-                use_container_width=True
-            )
-        except Exception as exc:
-            st.button("📷 JPG 생성 준비 중...", disabled=True, use_container_width=True, help=str(exc))
+        jpg_btn = f"""
+        <button onclick="
+            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
+            if(iframe) {{
+                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
+                if(plotlyDiv) {{
+                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }} else {{
+                // Fallback for native plot
+                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+                if(plots.length > 0) {{
+                    var Plotly = window.parent.Plotly;
+                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }}
+        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
+        📷 JPG (흰색 배경) 다운로드
+        </button>
+        """
+        st.components.v1.html(jpg_btn, height=45)
+
+    w_in = float(ctx.settings["geom"]["page_w_in"])
+    h_in = float(ctx.settings["geom"]["page_h_in"])
+    st.caption(
+        f"※ **출력 해상도 정보**: 화면 미리보기 배율과 무관하게, 연구실 설정에 명시된 "
+        f"네이티브 **{w_in:g}×{h_in:g} 인치** 크기를 정확히 유지한 채 **3배 고화질 스케일(300 dpi 상당)**로 영구 추출됩니다."
+    )# pd_app/ui/summary.py 파일 내부
+
+def _export(ctx, metric_rows) -> None:
+    """리포트 CSV 다운로드 및 고해상도 이미지 내보내기 트리거 패널."""
+    st.download_button(
+        "📊 요약 · 지표 CSV 다운로드",
+        data=_report_csv(ctx, metric_rows),
+        file_name=f"{_stem(ctx.fid)}_report.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    # 💡 [핵심 해결] Kaleido 엔진의 MathJax 버그를 피해, 프론트엔드 Plotly JS 기능을 트리거합니다.
+    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
+    c_png, c_jpg = st.columns(2)
+    
+    stem_name = _stem(ctx.fid)
+
+    with c_png:
+        # Plotly.downloadImage 를 강제로 실행시키는 JS 주입 버튼
+        png_btn = f"""
+        <button onclick="
+            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
+            if(iframe) {{
+                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
+                if(plotlyDiv) {{
+                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }} else {{
+                // Fallback for native plot
+                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+                if(plots.length > 0) {{
+                    var Plotly = window.parent.Plotly;
+                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }}
+        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
+        🖼️ PNG (투명 배경) 다운로드
+        </button>
+        """
+        st.components.v1.html(png_btn, height=45)
+
+    with c_jpg:
+        jpg_btn = f"""
+        <button onclick="
+            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
+            if(iframe) {{
+                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
+                if(plotlyDiv) {{
+                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }} else {{
+                // Fallback for native plot
+                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+                if(plots.length > 0) {{
+                    var Plotly = window.parent.Plotly;
+                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
+                }}
+            }}
+        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
+        📷 JPG (흰색 배경) 다운로드
+        </button>
+        """
+        st.components.v1.html(jpg_btn, height=45)
 
     w_in = float(ctx.settings["geom"]["page_w_in"])
     h_in = float(ctx.settings["geom"]["page_h_in"])
