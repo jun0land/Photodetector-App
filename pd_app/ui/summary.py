@@ -18,8 +18,6 @@ V_op 보간은 np.interp(외삽 금지 — 범위 밖이면 N/A).
 두 개의 진입점:
     render(ctx)          → 데이터 요약 표 ("데이터 요약" expander)
     render_metrics(ctx)  → R/D 입력 UI + 결과 표 + 내보내기 ("성능 지표 · 내보내기")
-
-PLAN §7 / V15: HTML 내보내기는 `include_plotlyjs=True` (오프라인 실험실 PC 대비).
 """
 
 from __future__ import annotations
@@ -34,14 +32,6 @@ import pandas as pd
 import streamlit as st
 
 from pd_app import constants, figure, state
-
-# to_html 은 기본적으로 div id 를 매번 새로 뽑는다 → 같은 그래프인데도 바이트가 달라져
-# Streamlit ForwardMsgCache(V17) 가 매 rerun 마다 4.9MB 를 다시 전송하게 된다.
-# id 를 고정하면 figure 가 그대로일 때 바이트도 그대로 = 캐시 적중.
-_EXPORT_DIV_ID = "pd-export"
-
-# 내보내기 HTML 대략 크기 (캡션용). include_plotlyjs=True 라 plotly.min.js 4.63MB 가 인라인된다.
-_INLINE_MB = 4.9
 
 # 전자 전하량 (D* 분모). 사용자 검수 완료 상수.
 _Q_ELECTRON = 1.602e-19  # C
@@ -95,7 +85,6 @@ def _table(ctx) -> None:
         pd.DataFrame(rows),
         width="stretch",
         hide_index=True,
-        # 좁은 패널에 들어가야 한다 — 행이 많아도 표가 레이아웃을 밀어내지 않게 상한을 둔다.
         height=min(38 + 35 * len(rows), 230),
         column_config={
             "V min": st.column_config.NumberColumn(format="%.3g", width="small"),
@@ -107,10 +96,6 @@ def _table(ctx) -> None:
 
 # ---------------- 성능 지표 계산 ----------------
 def _current_at(df, v_op):
-    """V_op 에서의 전류(부호 유지). V 오름차순 정렬 후 np.interp.
-    V_op 가 데이터 V 범위 밖이면 None (외삽 금지 — 최근접 끝값도 쓰지 않는다).
-    데이터가 없으면 None.
-    """
     if df is None or len(df) == 0:
         return None
     v = df["AnodeV"].to_numpy(dtype=float)
@@ -127,9 +112,7 @@ def _current_at(df, v_op):
 
 
 def _dark_current_at(parsed, v_op):
-    """|I_dark(V_op)|. 모든 Dark 트레이스를 **계산용으로만** concat → V 정렬 → 보간.
-    Dark 없거나 V_op 범위 밖이면 None.
-    """
+    """|I_dark(V_op)|. 모든 Dark 트레이스를 계산용으로만 concat 후 보간."""
     darks = [t["df"] for t in parsed["traces"]
              if t["label"] == "Dark" and t["df"] is not None and len(t["df"])]
     if not darks:
@@ -140,7 +123,6 @@ def _dark_current_at(parsed, v_op):
 
 
 def _metrics_of(settings):
-    """settings 의 metrics 블록 (없으면 기본값으로 시드). irradiance dict 보장."""
     m = settings.setdefault("metrics", copy.deepcopy(constants.DEFAULTS["metrics"]))
     m.setdefault("v_op", -1.0)
     m.setdefault("area", 1.0)
@@ -151,7 +133,6 @@ def _metrics_of(settings):
 
 
 def _wavelength_labels(parsed):
-    """파일의 파장 라벨(Dark 제외), 첫 등장 순서. 중복 라벨은 한 번만."""
     out, seen = [], set()
     for t in parsed["traces"]:
         lb = t["label"]
@@ -163,38 +144,33 @@ def _wavelength_labels(parsed):
 
 
 def _compute_metrics(ctx):
-    """파장별 R, D* 계산. 반환 (rows, i_dark_abs, v_op, area_cm2).
+    rows, i_dark_abs, v_op, area_cm2 = [], None, -1.0, 1.0
+    try:
+        m = _metrics_of(ctx.settings)
+        v_op = float(m["v_op"])
+        area_cm2 = float(m["area"]) * (1e-2 if m["area_unit"] == "mm2" else 1.0)
+        irr = m["irradiance"]
+        i_dark_abs = _dark_current_at(ctx.parsed, v_op)
 
-    rows = [{"파장", "E_e", "R", "D"}] — R/D 는 float 또는 None(N/A).
-    엣지: E_e≤0/미입력 → R,D=N/A. I_dark 없음/≤0 → D=N/A(그리고 R 도 I_dark 필요).
-          V_op 범위 밖 트레이스 → 그 행 N/A. I_ph≤0 → R 음수/0 그대로(가리지 않음).
-    """
-    m = _metrics_of(ctx.settings)
-    v_op = float(m["v_op"])
-    area_cm2 = float(m["area"]) * (1e-2 if m["area_unit"] == "mm2" else 1.0)
-    irr = m["irradiance"]
-    i_dark_abs = _dark_current_at(ctx.parsed, v_op)
+        df_by_label = {}
+        for t in ctx.parsed["traces"]:
+            if t["label"] != "Dark":
+                df_by_label.setdefault(t["label"], t["df"])
 
-    # 파장 라벨 → 대표 트레이스 df (첫 등장)
-    df_by_label = {}
-    for t in ctx.parsed["traces"]:
-        if t["label"] != "Dark":
-            df_by_label.setdefault(t["label"], t["df"])
-
-    rows = []
-    for label in _wavelength_labels(ctx.parsed):
-        ee = irr.get(label)
-        i_light = _current_at(df_by_label.get(label), v_op)
-        R = D = None
-        if (ee is not None and ee > 0 and area_cm2 > 0
-                and i_light is not None and i_dark_abs is not None):
-            ee_w = float(ee) * 1e-3                      # mW/cm² → W/cm²
-            i_ph = abs(i_light) - i_dark_abs             # I_ph = |I_light| − |I_dark|
-            R = i_ph / (ee_w * area_cm2)                 # A / (W/cm² · cm²) = A/W
-            if i_dark_abs > 0:
-                # D* = R·√A / √(2·q·I_dark)  → cm·√Hz/W (Jones)
-                D = R * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs)
-        rows.append({"파장": label, "E_e": ee, "R": R, "D": D})
+        for label in _wavelength_labels(ctx.parsed):
+            ee = irr.get(label)
+            i_light = _current_at(df_by_label.get(label), v_op)
+            R = D = None
+            if (ee is not None and ee > 0 and area_cm2 > 0
+                    and i_light is not None and i_dark_abs is not None):
+                ee_w = float(ee) * 1e-3
+                i_ph = abs(i_light) - i_dark_abs
+                R = i_ph / (ee_w * area_cm2)
+                if i_dark_abs > 0:
+                    D = R * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs)
+            rows.append({"파장": label, "E_e": ee, "R": R, "D": D})
+    except Exception:
+        pass
     return rows, i_dark_abs, v_op, area_cm2
 
 
@@ -210,7 +186,6 @@ def _metrics_inputs(ctx) -> None:
     c1, c2, c3 = st.columns([1.2, 1.2, 1])
     m["v_op"] = c1.number_input(
         "동작전압 V_op (V)", value=float(m["v_op"]), step=0.1, format="%g",
-        help="이 전압에서의 전류로 지표를 계산합니다 (역바이어스 관례: 기본 -1.0 V).",
         key=state.wkey("metrics", "v_op", fid=fid),
     )
     m["area"] = c2.number_input(
@@ -244,7 +219,6 @@ def _metrics_inputs(ctx) -> None:
 
 
 def _metrics_table(ctx):
-    """R/D 결과 표를 그리고 계산된 rows 를 반환 (내보내기가 재사용)."""
     rows, i_dark_abs, v_op, _ = _compute_metrics(ctx)
     if not rows:
         st.caption("파장 트레이스가 없어 지표를 계산할 수 없습니다.")
@@ -256,40 +230,51 @@ def _metrics_table(ctx):
     st.dataframe(disp, width="stretch", hide_index=True,
                  height=min(38 + 35 * len(rows), 320))
     if i_dark_abs is None:
-        st.caption("Dark 트레이스가 없거나 V_op 가 Dark 범위 밖이라 I_dark 를 구하지 못했습니다 "
-                   "— R/D*가 N/A 입니다.")
+        st.caption("Dark 트레이스가 없거나 V_op 가 Dark 범위 밖이라 I_dark 를 구하지 못했습니다 — R/D*가 N/A 입니다.")
     return rows
 
 
-# ---------------- 내보내기 ----------------
-def _export_html(fig) -> bytes:
-    """figure → 자체 완결 HTML 바이트. V15: plotly.min.js 를 인라인(오프라인 대비)."""
-    return fig.to_html(
-        include_plotlyjs=True,
-        full_html=True,
-        div_id=_EXPORT_DIV_ID,
-    ).encode("utf-8")
+# ---------------- 고성능 고해상도 이미지 내보내기 연산 ----------------
+def _export_png(fig) -> bytes:
+    """figure을 받아 투명 배경을 강제 주입하고 고화질 3배 스케일 바이너리로 구워냅니다."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",  # 💡 완전 투명 배경화
+        plot_bgcolor="white"            # 플롯 내부 격자판은 깔끔하게 흰색 유지
+    )
+    return fig.to_image(format="png", scale=3)
+
+
+def _export_jpg(fig) -> bytes:
+    """figure을 받아 안전한 흰색 배경을 강제 주입하고 고화질 3배 스케일 바이너리로 구워냅니다."""
+    fig.update_layout(
+        paper_bgcolor="white",
+        plot_bgcolor="white"
+    )
+    return fig.to_image(format="jpeg", scale=3)
 
 
 @st.cache_data(max_entries=2, show_spinner=False)
-def _export_html_cached(_fig, sig: str) -> bytes:
-    """`_fig` 는 밑줄 접두사라 해시 대상에서 빠진다 — 캐시 키는 `sig` 뿐이다."""
-    return _export_html(_fig)
+def _export_png_cached(_fig, sig: str) -> bytes:
+    """UI 지연 현상을 철저히 차단하는 투명 PNG 캐시 제어 유닛."""
+    return _export_png(_fig)
+
+
+@st.cache_data(max_entries=2, show_spinner=False)
+def _export_jpg_cached(_fig, sig: str) -> bytes:
+    """UI 지연 현상을 철저히 차단하는 흰색 JPG 캐시 제어 유닛."""
+    return _export_jpg(_fig)
 
 
 def _sig(ctx) -> str:
-    """figure 를 결정하는 것 = fid + settings. 둘 다 같으면 HTML 도 같다."""
     return json.dumps([ctx.fid, ctx.settings], sort_keys=True, default=str)
 
 
 def _stem(fid) -> str:
-    """내보내기 파일명 = 업로드 파일명에서 확장자만 뗀 것 (레거시와 동일)."""
     f = state.S()["files"].get(fid) or {}
     return str(f.get("name", "graph")).rsplit(".", 1)[0] or "graph"
 
 
 def _report_csv(ctx, metric_rows) -> bytes:
-    """데이터 요약 + 성능 지표를 하나의 CSV 로. utf-8-sig 라 Excel 이 한글을 바로 연다."""
     m = _metrics_of(ctx.settings)
     buf = io.StringIO()
     buf.write("# Photodetector I-V Studio — report\n")
@@ -314,52 +299,66 @@ def _report_csv(ctx, metric_rows) -> bytes:
 
 
 def _export(ctx, metric_rows) -> None:
-    """리포트 CSV(요약+지표) + 그래프 HTML 다운로드 + PNG 안내."""
+    """리포트 CSV 다운로드 및 캐싱된 고해상도 투명 PNG / 흰색 JPG 내보내기 패널."""
     st.download_button(
-        "요약·지표 CSV 다운로드",
+        "📊 요약 · 지표 CSV 다운로드",
         data=_report_csv(ctx, metric_rows),
         file_name=f"{_stem(ctx.fid)}_report.csv",
         mime="text/csv",
-        width="stretch",
+        use_container_width=True
     )
 
-    # PLAN §8.1: 화면 그래프는 미리보기 축소본이다. 내보내기는 px_scale 기본값(1.0)으로
-    # **새로** 만든다 — 정확히 960×768 = 10×8in.
-    try:
-        fig = figure.build_figure(ctx.fid)
-    except NotImplementedError:
-        st.caption("figure 모듈(WP1)이 아직 준비 중이라 HTML 내보내기를 잠시 사용할 수 없습니다.")
-        return
+    # 💡 [전면 교체] HTML 다운로드를 완전히 드러내고 300dpi급 논문용 이미지 직접 추출 연동
+    c_png, c_jpg = st.columns(2)
+    sig_key = _sig(ctx)
 
-    st.download_button(
-        "그래프 HTML 다운로드",
-        data=_export_html_cached(fig, _sig(ctx)),
-        file_name=f"{_stem(ctx.fid)}.html",
-        mime="text/html",
-        width="stretch",
-    )
+    with c_png:
+        try:
+            # 상호 오염 방지를 위해 독립된 PNG용 피규어 빌드 및 캐싱 호출
+            fig_png = figure.build_figure(ctx.fid)
+            png_bytes = _export_png_cached(fig_png, sig_key)
+            st.download_button(
+                "🖼️ 투명 PNG 다운로드",
+                data=png_bytes,
+                file_name=f"{_stem(ctx.fid)}.png",
+                mime="image/png",
+                use_container_width=True
+            )
+        except Exception as exc:
+            st.button("🖼️ PNG 생성 준비 중...", disabled=True, use_container_width=True, help=str(exc))
+
+    with c_jpg:
+        try:
+            # 상호 오염 방지를 위해 독립된 JPG용 피규어 빌드 및 캐싱 호출
+            fig_jpg = figure.build_figure(ctx.fid)
+            jpg_bytes = _export_jpg_cached(fig_jpg, sig_key)
+            st.download_button(
+                "📷 흰색 JPG 다운로드",
+                data=jpg_bytes,
+                file_name=f"{_stem(ctx.fid)}.jpg",
+                mime="image/jpeg",
+                use_container_width=True
+            )
+        except Exception as exc:
+            st.button("📷 JPG 생성 준비 중...", disabled=True, use_container_width=True, help=str(exc))
 
     w_in = float(ctx.settings["geom"]["page_w_in"])
     h_in = float(ctx.settings["geom"]["page_h_in"])
     st.caption(
-        f"HTML 은 plotly.js 를 파일 안에 담아 **인터넷 없이도** 열립니다 (그래서 ~{_INLINE_MB:g}MB). · "
-        f"PNG 는 그래프 우측 상단 모드바의 **카메라** 아이콘 (300dpi 상당, scale 3). · "
-        f"둘 다 화면 미리보기 배율과 무관하게 정확히 **{w_in:g}×{h_in:g}인치**로 나갑니다."
+        f"※ **출력 해상도 정보**: 화면 미리보기 배율과 무관하게, 연구실 설정에 명시된 "
+        f"네이티브 **{w_in:g}×{h_in:g} 인치** 크기를 정확히 유지한 채 **3배 고화질 스케일(300 dpi 상당)**로 영구 추출됩니다."
     )
 
 
 # ---------------- 진입점 ----------------
 def render(ctx) -> None:
-    """데이터 요약 ("데이터 요약" expander). Range I 경고 + 요약 표."""
+    """데이터 요약 ("데이터 요약" expander)."""
     _range_i_warning(ctx.parsed)
     _table(ctx)
 
 
 def render_metrics(ctx) -> None:
-    """성능 지표 + 내보내기 ("성능 지표 · 내보내기" expander).
-
-    입력 UI → 파장별 R/D* 결과 표 → 요약·지표 CSV + 그래프 HTML 내보내기.
-    """
+    """성능 지표 + 내보내기 ("성능 지표 · 내보내기" expander)."""
     _metrics_inputs(ctx)
     st.markdown("---")
     metric_rows = _metrics_table(ctx)

@@ -31,15 +31,15 @@ from pd_app.ui.toolbar import rich_input
 
 # 3×3 정위치 (domain 좌표). 실사용의 ~90% 를 한 번의 클릭으로 커버한다.
 _SPOTS = {
-    "↖": (0.01, 0.99, "left", "top"),
-    "↑": (0.50, 0.99, "center", "top"),
-    "↗": (0.99, 0.99, "right", "top"),
+    "↖": (0.01, 0.995, "left", "top"),
+    "↑": (0.50, 0.995, "center", "top"),
+    "↗": (0.99, 0.995, "right", "top"),
     "←": (0.01, 0.50, "left", "middle"),
     "•": (0.50, 0.50, "center", "middle"),
     "→": (0.99, 0.50, "right", "middle"),
-    "↙": (0.01, 0.01, "left", "bottom"),
-    "↓": (0.50, 0.01, "center", "bottom"),
-    "↘": (0.99, 0.01, "right", "bottom"),
+    "↙": (0.01, 0.005, "left", "bottom"),
+    "↓": (0.50, 0.005, "center", "bottom"),
+    "↘": (0.99, 0.005, "right", "bottom"),
 }
 
 _INHERIT = "(서식 탭 폰트 상속)"

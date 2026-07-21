@@ -75,7 +75,7 @@ LINE_WIDTH_STEP = 0.5
 INSET_PAD_X = 0.014      # 박스 좌우 안쪽 여백 (paper x)
 INSET_SWATCH_W = 0.05    # 선 스와치 길이 (paper x)
 INSET_GAP = 0.014        # 스와치 <-> 텍스트 간격 (paper x)
-INSET_PAD_PX = 7         # 박스 위/아래 안쪽 여백 (px)
+INSET_PAD_PX = 4         # 박스 위/아래 안쪽 여백 (px)
 
 # 파싱: Settings 블록 구분자 (parsing.py 가 이 상수를 import 한다)
 SEP_TOKEN = "=================================="
@@ -117,8 +117,8 @@ DEFAULTS = {
               "line_width": 2.0, "show_markers": False, "show_grid": False},
     "insets": {
         # PLAN §4.3: 인셋 ref 가 paper -> "x domain"/"y domain" 으로 바뀌어
-        # 0.97/0.97 은 이제 페이지가 아니라 플롯 영역의 우상단을 뜻한다 (Origin 예시와 동일).
-        "legend": {"x": 0.97, "y": 0.97, "xanchor": "right", "yanchor": "top",
+        # 0.003/0.003 은 플롯 영역의 좌측 하단을 뜻한다 (테두리 밀착 규격).
+        "legend": {"x": 0.003, "y": 0.003, "xanchor": "left", "yanchor": "bottom",
                    "width": 0.30,
                    "border": False, "border_color": "#000000", "bg_color": "#FFFFFF",
                    "bg_opacity": 1.0,
