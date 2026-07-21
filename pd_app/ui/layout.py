@@ -136,10 +136,15 @@ def _banner() -> str | None:
             # [핵심] 위젯(segmented_control)이 물고 있던 예전 파일의 기억(캐시)을 강제로 지워줍니다!
             if "pd_banner_sel" in st.session_state:
                 del st.session_state["pd_banner_sel"]
+            # 👇 [추가할 부분] 2. 파일 업로더에 남아있는 '좀비 파일' 기억 강제 삭제!
+            if "pd_file_uploader" in st.session_state:
+                del st.session_state["pd_file_uploader"]
 
     files = s["files"]
     with st.container(key="pd_banner"):
-        c_sel, c_del = st.columns([9, 1], vertical_alignment="center")
+        c_sel = st.columns([9, 1], vertical_alignment="center")
+        c_del = st.columns([5, 1, 1], vertical_alignment="center")
+
         with c_sel:
             sel = st.segmented_control(
                 "파일",
