@@ -1,15 +1,6 @@
 """[트레이스] 탭: 트레이스 on/off (D5), 색, dash, 레전드 텍스트. 소유: WP3.
 
 ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
-    fid       현재 활성 파일 id
-    settings  state.file_settings(fid) — 모델이 유일한 진실
-    traces    settings["traces"] (TKey -> dict)
-    parsed    parsing.parse_file() 결과
-    fig_px    figure.px_size(geom) → (w, h)
-    domains   figure.domains(geom) → {"x0","x1","y0","y1"}
-
-패널은 read-render-writeback. 위젯키는 반드시 `state.wkey(group, name, fid=fid)`.
-이 모듈은 `render` 외에 아무것도 공개하지 않는다.
 """
 
 from __future__ import annotations
@@ -21,95 +12,84 @@ import streamlit as st
 from pd_app import constants, state
 from pd_app.ui.toolbar import rich_input
 
-# st-key 클래스에 안전한 문자로 tk("940 nm#1")를 정규화. CSS 훅(theme.py)이 이걸 쓴다.
 _SAFE = re.compile(r"\W+")
 
 _CUSTOM = "Custom"
 _COLOR_NAMES = list(constants.ORIGIN_COLORS.keys())
 _COLOR_OPTIONS = _COLOR_NAMES + [_CUSTOM]
-_DASH_LABELS = list(constants.DASH_OPTIONS.keys())          # ["Solid", "Dash", ...]
+_DASH_LABELS = list(constants.DASH_OPTIONS.keys())
 _DASH_BY_VALUE = {v: k for k, v in constants.DASH_OPTIONS.items()}
 
 
 def _color_name_of(hex_color):
-    """hex -> Origin 팔레트 이름. 팔레트에 없으면 'Custom'."""
     h = str(hex_color).upper()
     return next((k for k, v in constants.ORIGIN_COLORS.items() if v.upper() == h), _CUSTOM)
 
 
-def _palette(ctx, tk, tr, safe):
-    """popover 안: OriginLab 24색 그리드 + Custom("C") + (Custom 시)color_picker.
-
-    각 색 칸은 빈 라벨 st.button(`help`=색상명 → hover 툴팁). 위치→색 매핑과 30px 정사각형·
-    회색 Custom 칸은 theme.py CSS 가 st-key 훅(`pd_palette_*`)으로 그린다.
-    """
+@st.dialog("🎨 색상 및 투명도 설정")
+def _color_dialog(ctx, tk, safe):
+    """팝업 꺼짐 버그를 해결한 모달 다이얼로그 형태의 색상/투명도 제어판."""
     fid = ctx.fid
-    with st.container(key=f"pd_palette_{safe}"):
-        for name, hexv in constants.ORIGIN_COLORS.items():
-            if st.button("", key=state.wkey("trace", f"{tk}.pal.{name}", fid=fid),
-                         help=name):
+    tr = ctx.settings["traces"][tk]
+
+    st.markdown("**1. Origin 24색 팔레트 (빠른 적용)**")
+    cols = st.columns(6)
+    for i, (name, hexv) in enumerate(constants.ORIGIN_COLORS.items()):
+        with cols[i % 6]:
+            if st.button(" ", key=f"pal_{safe}_{name}", help=name, use_container_width=True):
                 tr["color"] = hexv
                 st.rerun()
-                
-    # 👇 [추가됨] Custom 색상이 변경될 때 즉시 상태를 업데이트하고 새로고침하는 콜백 함수
-    def _update_custom_color():
-        # color_picker의 위젯 키를 통해 변경된 값을 직접 읽어옵니다.
-        picker_key = state.wkey("trace", f"{tk}.color", fid=fid)
-        tr["color"] = st.session_state[picker_key]
-        # (on_change 콜백이 실행된 후 Streamlit이 자동으로 rerun을 수행하므로 명시적 st.rerun()은 생략)
+            st.html(f"<style>.st-key-pal_{safe}_{name} button {{ background-color: {hexv} !important; height: 25px; min-height: 25px; padding: 0; border: 1px solid #ccc; }}</style>")
 
-    c_pick, c_lbl = st.columns([1, 4])
+    st.markdown("<br>**2. 커스텀 색상 및 투명도 조절**", unsafe_allow_html=True)
+    c_pick, c_trans = st.columns(2)
     with c_pick:
-        # 👇 [수정됨] on_change 파라미터를 추가하여 색상이 바뀌는 즉시 함수를 호출하게 합니다.
-        st.color_picker(
-            "Custom", 
-            value=tr["color"],
-            key=state.wkey("trace", f"{tk}.color", fid=fid),
-            label_visibility="collapsed",
-            on_change=_update_custom_color
+        temp_color = st.color_picker("Hex 색상 선택", value=tr.get("color", "#000000"), key=f"pick_{safe}")
+    with c_trans:
+        temp_trans = st.number_input(
+            "투명도 (%)", min_value=0, max_value=100, 
+            value=int(float(tr.get("transparency", 0))), 
+            step=5, key=f"trans_{safe}", help="0: 완전 불투명, 100: 완전 투명"
         )
-        
-    c_lbl.html(
-        "<div style='display: flex; align-items: center; height: 30px; "
-        "color: #6b6b70; font-size: 0.88rem; margin-left: -4px;'>"
-        "Custom</div>"
-    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button("✅ 설정 적용", type="primary", use_container_width=True):
+        tr["color"] = temp_color
+        tr["transparency"] = temp_trans
+        st.rerun()
 
 
 def _color_control(ctx, tk, tr, col):
-    """색상 컬럼: 현재 색을 채운 30px 스와치(popover 트리거). 클릭하면 팔레트가 열린다.
-
-    트리거 배경(=현재 색)은 동적이라 per-trace <style> 로 주입하고, 크기/모양은
-    theme.py 의 정적 CSS(`pd_sw_*`)가 준다.
-    """
+    """색상 컬럼: 현재 색/투명도를 반영한 버튼(다이얼로그 트리거)."""
     safe = _SAFE.sub("_", tk)
     cur_name = _color_name_of(tr["color"])
+    trans_pct = int(float(tr.get("transparency", 0)))
+    trans_text = f" (투명도 {trans_pct}%)" if trans_pct > 0 else ""
+    opacity_val = 1.0 - (trans_pct / 100.0)
+
     with col:
+        # 버튼에 선택된 색상과 투명도(opacity)를 주입하여 직관적으로 보이게 합니다.
         st.html(
-            f"<style>.st-key-pd_sw_{safe} [data-testid='stPopover'] button"
-            f"{{background:{tr['color']} !important;}}</style>"
+            f"<style>.st-key-pd_sw_{safe} button "
+            f"{{background:{tr['color']} !important; opacity: {opacity_val}; min-height: 30px; border: 1px solid #ccc; border-radius: 4px;}} "
+            f".st-key-pd_sw_{safe} button:hover {{filter: brightness(0.8);}}</style>"
         )
         with st.container(key=f"pd_sw_{safe}"):
-            with st.popover(" ", use_container_width=False,
-                            help=f"색상: {cur_name} — 클릭해서 변경"):
-                _palette(ctx, tk, tr, safe)
+            if st.button(" ", use_container_width=True, help=f"색상: {cur_name}{trans_text} — 클릭해서 변경"):
+                _color_dialog(ctx, tk, safe)
 
 
 def _render_row(ctx, tk, tr):
-    """트레이스 한 줄. 한 파일에 8개 이상 올 수 있으므로 행 하나에 모두 담는다."""
     fid = ctx.fid
-    # 스와치·dash·텍스트를 한 줄에 가지런히 — vertical_alignment="center".
     c_on, c_color, c_dash, c_text = st.columns(
         [1.6, 0.7, 1.1, 1.2], vertical_alignment="center")
 
-    # D5: 트레이스 on/off 는 Plotly 레전드가 아니라 여기 (레전드는 D1 로 제거됨)
     tr["visible"] = c_on.checkbox(
         tr["label"], value=bool(tr["visible"]),
         key=state.wkey("trace", f"{tk}.visible", fid=fid),
         help="그래프에 이 트레이스를 표시합니다.",
     )
 
-    # 색: 현재 색 스와치 → 클릭 시 OriginLab 24색 팔레트 popover (드롭다운 제거)
     _color_control(ctx, tk, tr, c_color)
 
     dash_label = _DASH_BY_VALUE.get(tr["dash"], _DASH_LABELS[0])
@@ -121,16 +101,14 @@ def _render_row(ctx, tk, tr):
         )
     ]
 
-    # 텍스트는 popover 안에 — 트레이스가 많아도 패널 높이가 O(1) 로 유지된다 (G1)
     with c_text.popover("텍스트", use_container_width=True):
-        tr["legend_raw"] = rich_input(  # 👈 st.text_input을 rich_input으로 변경
-            "레전드 텍스트", tr["legend_raw"],  # 👈 value= 제거 (파라미터 순서 맞춤)
+        tr["legend_raw"] = rich_input(
+            "레전드 텍스트", tr.get("legend_raw", ""),
             key=state.wkey("trace", f"{tk}.legend_raw", fid=fid)
         )
 
 
 def render(ctx) -> None:
-    """트레이스 탭 렌더."""
     traces = ctx.traces
     if not traces:
         st.caption("표시할 트레이스가 없습니다.")
