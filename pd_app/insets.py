@@ -53,7 +53,7 @@ def legend_rows(settings):
             "width": tr["width"],
             "dash": tr["dash"],
             # 💡 [추가됨] 인셋 스와치용 투명도 값 매핑 (0~100을 1.0~0.0으로)
-            "opacity": 1.0 - (float(tr.get("transparency", 0)) / 100.0),
+            "opacity": 1.0 - (float(tr.get("transparency", 40)) / 100.0),
         })
     return rows
 

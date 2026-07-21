@@ -167,7 +167,7 @@ def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
         width = float(ts.get("width", style["line_width"])) * scale
         
         # 💡 [핵심] 설정된 투명도(0~100%)를 Plotly opacity(1.0~0.0)로 변환
-        opacity = 1.0 - (float(ts.get("transparency", 0)) / 100.0)
+        opacity = 1.0 - (float(ts.get("transparency", 40)) / 100.0)
 
         fig.add_trace(go.Scatter(
             x=x, y=y,

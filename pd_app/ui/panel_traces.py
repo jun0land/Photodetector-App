@@ -35,7 +35,6 @@ def _color_dialog(ctx, tk, safe):
 
     st.markdown("**1. Origin 24색 팔레트 (8×3 배열)**")
     
-    # 💡 [해결 1] Streamlit 순정 columns를 활용한 절대 깨지지 않는 8x3 정방형 스와치 배열
     colors = list(constants.ORIGIN_COLORS.items())
     for row in range(0, 24, 8):
         cols = st.columns(8)
@@ -49,7 +48,6 @@ def _color_dialog(ctx, tk, safe):
                         tr["color"] = hexv
                         st.rerun()
                     
-                    # 버튼을 완벽한 30x30 정사각형으로 깎고 중앙 정렬시킵니다.
                     st.html(
                         f"<style>"
                         f".st-key-{btn_key} button {{"
@@ -71,7 +69,6 @@ def _color_dialog(ctx, tk, safe):
     st.markdown("<br>**2. 커스텀 색상 및 투명도 조절**", unsafe_allow_html=True)
     c_preview, c_hex, c_trans = st.columns([1.2, 2, 2], vertical_alignment="bottom")
     
-    # 💡 [해결 2] React 기반 Streamlit의 Input State를 강제로 업데이트하는 JS 해킹 적용
     with c_preview:
         html_picker = f"""
         <div style="display:flex; flex-direction:column; align-items:center; margin-bottom:5px;">
@@ -81,7 +78,6 @@ def _color_dialog(ctx, tk, safe):
                    oninput="
                         var hexInput = window.parent.document.querySelector('.st-key-hex_input_{safe} input');
                         if (hexInput) {{
-                            // React 17+ 의 입력 감지 엔진을 속여서 진짜 타이핑한 것처럼 이벤트를 쏩니다!
                             var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
                             nativeSetter.call(hexInput, this.value);
                             hexInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
@@ -97,9 +93,10 @@ def _color_dialog(ctx, tk, safe):
             temp_color = "#" + temp_color.lstrip("#")
             
     with c_trans:
+        # 💡 [수정] 투명도 데이터가 없을 때의 기본값을 0에서 40으로 수정했습니다.
         temp_trans = st.number_input(
             "투명도 (%)", min_value=0, max_value=100, 
-            value=int(float(tr.get("transparency", 0))), 
+            value=int(float(tr.get("transparency", 40))), 
             step=5, key=f"trans_{safe}"
         )
 
@@ -115,7 +112,8 @@ def _color_control(ctx, tk, tr, col):
     """색상 컬럼: 메인 편집 창 리스트에 렌더링되는 정사각형 트리거 위젯."""
     safe = _SAFE.sub("_", tk)
     cur_name = _color_name_of(tr["color"])
-    trans_pct = int(float(tr.get("transparency", 0)))
+    # 💡 [수정] 메인 리스트 스와치 렌더링 시에도 기본 투명도를 40%로 반영합니다.
+    trans_pct = int(float(tr.get("transparency", 40)))
     trans_text = f" (투명도 {trans_pct}%)" if trans_pct > 0 else ""
     opacity_val = 1.0 - (trans_pct / 100.0)
 
