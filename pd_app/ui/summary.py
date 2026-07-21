@@ -1,4 +1,7 @@
-"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7."""
+"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7.
+
+ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
+"""
 
 from __future__ import annotations
 
@@ -244,28 +247,21 @@ def _export(ctx, metric_rows) -> None:
         use_container_width=True
     )
 
-    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi · 흰색 배경)</b>", unsafe_allow_html=True)
+    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
     
-    # 💡 [핵심 해결] 내보내기 전용 완벽한 10x8(스케일 1.0) 비율의 숨겨진 백그라운드 그래프를 하나 더 생성합니다.
+    # 💡 [핵심 패치] Streamlit UI를 완전히 배제하고, 순수하게 완벽한 1.0 비율의 데이터를 JSON 텍스트로만 굽습니다!
     try:
-        # px_scale=1.0 강제 적용으로 여백 깨짐 현상 원천 차단
-        export_fig = figure.build_figure(ctx.fid, px_scale=1.0)
-        export_fig.update_layout(paper_bgcolor="white", plot_bgcolor="white")
+        # 1. 투명 PNG용 데이터 (배경 투명 강제 주입)
+        export_fig_png = figure.build_figure(ctx.fid, px_scale=1.0)
+        export_fig_png.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="white")
+        export_json_png = export_fig_png.to_json().replace("</script>", "<\\/script>")
         
-        # 화면에 보이지 않는 (height=0, 넓이 0) 컨테이너 안에 렌더링
-        with st.container():
-            st.plotly_chart(
-                export_fig,
-                key=f"export_hidden_plot_{ctx.fid}",
-                config={"displayModeBar": False, "responsive": False},
-                # CSS를 이용해 뷰포트에서 이 객체를 완전히 숨깁니다.
-                use_container_width=False,
-                height=0
-            )
-            st.html(f"<style>div[data-testid='stPlotlyChart']:has(div[id*='export_hidden_plot_{ctx.fid}']) {{ display: none !important; height: 0px !important; margin: 0 !important; padding: 0 !important; }}</style>")
-            
+        # 2. 흰색 JPG용 데이터 (배경 흰색 강제 주입)
+        export_fig_jpg = figure.build_figure(ctx.fid, px_scale=1.0)
+        export_fig_jpg.update_layout(paper_bgcolor="white", plot_bgcolor="white")
+        export_json_jpg = export_fig_jpg.to_json().replace("</script>", "<\\/script>")
     except Exception as e:
-        st.error("내보내기용 그래프 준비 중 오류가 발생했습니다.")
+        st.error("내보내기 데이터 준비 중 오류가 발생했습니다.")
         return
 
     c_png, c_jpg = st.columns(2)
@@ -277,50 +273,86 @@ def _export(ctx, metric_rows) -> None:
         "background-color:rgb(255, 255, 255); color:rgb(49, 51, 63); "
         "border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; "
         "cursor:pointer; font-size:14px; font-weight:400; "
-        "font-family:-apple-system, BlinkMacSystemFont, \\'Segoe UI\\', Roboto, Helvetica, Arial, sans-serif; "
+        "font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
         "display:inline-flex; align-items:center; justify-content:center; "
         "transition: border-color 0.15s ease, color 0.15s ease; box-sizing:border-box;"
     )
     
-    on_hover = f"this.style.borderColor=\\'{accent_color}\\'; this.style.color=\\'{accent_color}\\';"
-    on_leave = "this.style.borderColor=\\'rgba(49, 51, 63, 0.2)\\'; this.style.color=\\'rgb(49, 51, 63)\\';"
+    on_hover = f"this.style.borderColor='{accent_color}'; this.style.color='{accent_color}';"
+    on_leave = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
 
     with c_png:
-        # 💡 [핵심 해결] 미리보기 화면(첫 번째 plot)이 아니라, 방금 만든 숨겨진 원본 스케일 그래프(두 번째 plot)를 타겟팅하여 캡처합니다.
-        png_btn = f"""
+        # 💡 [핵심 패치] 버튼 클릭 시, 가상의 960x768 캔버스를 만들어 백그라운드 JSON 데이터를 렌더링하고 즉시 저장!
+        png_html = f"""
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
-        <button onclick="
-            var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-            // 숨겨진 두 번째 플롯(원본 비율)을 찾아서 캡처
-            var targetPlot = plots.length > 1 ? plots[plots.length - 1] : (plots.length > 0 ? plots[0] : null);
-            if(targetPlot) {{
-                var Plotly = window.parent.Plotly;
-                if(Plotly) Plotly.downloadImage(targetPlot, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-            }}
-        " style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
-        🖼️ PNG 다운로드
+        <button id="btn-png" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
+        🖼️ PNG (투명 배경) 다운로드
         </button>
+        <script>
+        document.getElementById('btn-png').addEventListener('click', function() {{
+            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
+            if(iframe) {{
+                var Plotly = iframe.contentWindow.Plotly;
+                var doc = iframe.contentWindow.document;
+                
+                var tempDiv = doc.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.visibility = 'hidden';
+                tempDiv.style.width = '960px';
+                tempDiv.style.height = '768px';
+                doc.body.appendChild(tempDiv);
+                
+                var figData = {export_json_png};
+                
+                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                    Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                        doc.body.removeChild(tempDiv);
+                    }});
+                }});
+            }} else {{
+                alert('그래프 렌더러를 찾을 수 없습니다.');
+            }}
+        }});
+        </script>
         </body>
         """
-        st.components.v1.html(png_btn, height=40)
+        st.components.v1.html(png_html, height=40)
 
     with c_jpg:
-        jpg_btn = f"""
+        jpg_html = f"""
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
-        <button onclick="
-            var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-            // 숨겨진 두 번째 플롯(원본 비율)을 찾아서 캡처
-            var targetPlot = plots.length > 1 ? plots[plots.length - 1] : (plots.length > 0 ? plots[0] : null);
-            if(targetPlot) {{
-                var Plotly = window.parent.Plotly;
-                if(Plotly) Plotly.downloadImage(targetPlot, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-            }}
-        " style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
-        📷 JPG 다운로드
+        <button id="btn-jpg" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
+        📷 JPG (흰색 배경) 다운로드
         </button>
+        <script>
+        document.getElementById('btn-jpg').addEventListener('click', function() {{
+            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
+            if(iframe) {{
+                var Plotly = iframe.contentWindow.Plotly;
+                var doc = iframe.contentWindow.document;
+                
+                var tempDiv = doc.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.visibility = 'hidden';
+                tempDiv.style.width = '960px';
+                tempDiv.style.height = '768px';
+                doc.body.appendChild(tempDiv);
+                
+                var figData = {export_json_jpg};
+                
+                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                    Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                        doc.body.removeChild(tempDiv);
+                    }});
+                }});
+            }} else {{
+                alert('그래프 렌더러를 찾을 수 없습니다.');
+            }}
+        }});
+        </script>
         </body>
         """
-        st.components.v1.html(jpg_btn, height=40)
+        st.components.v1.html(jpg_html, height=40)
 
     w_in = float(ctx.settings["geom"]["page_w_in"])
     h_in = float(ctx.settings["geom"]["page_h_in"])
