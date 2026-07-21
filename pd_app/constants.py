@@ -118,7 +118,7 @@ DEFAULTS = {
     "insets": {
         # PLAN §4.3: 인셋 ref 가 paper -> "x domain"/"y domain" 으로 바뀌어
         # 0.003/0.003 은 플롯 영역의 좌측 하단을 뜻한다 (테두리 밀착 규격).
-        "legend": {"x": 0.003, "y": 0.003, "xanchor": "left", "yanchor": "bottom",
+        "legend": {"x": 0.01, "y": 0.005, "xanchor": "left", "yanchor": "bottom",
                    "width": 0.30,
                    "border": False, "border_color": "#000000", "bg_color": "#FFFFFF",
                    "bg_opacity": 1.0,
