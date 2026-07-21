@@ -1,7 +1,4 @@
-"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7.
-
-ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
-"""
+"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7."""
 
 from __future__ import annotations
 
@@ -249,17 +246,15 @@ def _export(ctx, metric_rows) -> None:
 
     st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
     
-    # 💡 [핵심 패치] Streamlit UI를 완전히 배제하고, 순수하게 완벽한 1.0 비율의 데이터를 JSON 텍스트로만 굽습니다!
     try:
-        # 1. 투명 PNG용 데이터 (배경 투명 강제 주입)
+        # JSON 데이터 추출 (에러 원천 방지)
         export_fig_png = figure.build_figure(ctx.fid, px_scale=1.0)
         export_fig_png.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="white")
-        export_json_png = export_fig_png.to_json().replace("</script>", "<\\/script>")
+        export_json_png = export_fig_png.to_json()
         
-        # 2. 흰색 JPG용 데이터 (배경 흰색 강제 주입)
         export_fig_jpg = figure.build_figure(ctx.fid, px_scale=1.0)
         export_fig_jpg.update_layout(paper_bgcolor="white", plot_bgcolor="white")
-        export_json_jpg = export_fig_jpg.to_json().replace("</script>", "<\\/script>")
+        export_json_jpg = export_fig_jpg.to_json()
     except Exception as e:
         st.error("내보내기 데이터 준비 중 오류가 발생했습니다.")
         return
@@ -282,75 +277,65 @@ def _export(ctx, metric_rows) -> None:
     on_leave = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
 
     with c_png:
-        # 💡 [핵심 패치] 버튼 클릭 시, 가상의 960x768 캔버스를 만들어 백그라운드 JSON 데이터를 렌더링하고 즉시 저장!
+        # 💡 [핵심 패치] 독립된 Plotly CDN을 호출하여 백그라운드에서 직접 이미지를 구워냅니다.
         png_html = f"""
+        <html>
+        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button id="btn-png" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
         🖼️ PNG (투명 배경) 다운로드
         </button>
         <script>
         document.getElementById('btn-png').addEventListener('click', function() {{
-            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
-            if(iframe) {{
-                var Plotly = iframe.contentWindow.Plotly;
-                var doc = iframe.contentWindow.document;
-                
-                var tempDiv = doc.createElement('div');
-                tempDiv.style.position = 'absolute';
-                tempDiv.style.visibility = 'hidden';
-                tempDiv.style.width = '960px';
-                tempDiv.style.height = '768px';
-                doc.body.appendChild(tempDiv);
-                
-                var figData = {export_json_png};
-                
-                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                    Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                        doc.body.removeChild(tempDiv);
-                    }});
+            var tempDiv = document.createElement('div');
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.width = '960px';
+            tempDiv.style.height = '768px';
+            document.body.appendChild(tempDiv);
+            
+            var figData = {export_json_png};
+            
+            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                    document.body.removeChild(tempDiv);
                 }});
-            }} else {{
-                alert('그래프 렌더러를 찾을 수 없습니다.');
-            }}
+            }});
         }});
         </script>
         </body>
+        </html>
         """
         st.components.v1.html(png_html, height=40)
 
     with c_jpg:
         jpg_html = f"""
+        <html>
+        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
         <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button id="btn-jpg" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
         📷 JPG (흰색 배경) 다운로드
         </button>
         <script>
         document.getElementById('btn-jpg').addEventListener('click', function() {{
-            var iframe = window.parent.document.querySelector('iframe[title="streamlit_plotly_events.plotly_chart"]');
-            if(iframe) {{
-                var Plotly = iframe.contentWindow.Plotly;
-                var doc = iframe.contentWindow.document;
-                
-                var tempDiv = doc.createElement('div');
-                tempDiv.style.position = 'absolute';
-                tempDiv.style.visibility = 'hidden';
-                tempDiv.style.width = '960px';
-                tempDiv.style.height = '768px';
-                doc.body.appendChild(tempDiv);
-                
-                var figData = {export_json_jpg};
-                
-                Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                    Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                        doc.body.removeChild(tempDiv);
-                    }});
+            var tempDiv = document.createElement('div');
+            tempDiv.style.position = 'absolute';
+            tempDiv.style.left = '-9999px';
+            tempDiv.style.width = '960px';
+            tempDiv.style.height = '768px';
+            document.body.appendChild(tempDiv);
+            
+            var figData = {export_json_jpg};
+            
+            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
+                Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
+                    document.body.removeChild(tempDiv);
                 }});
-            }} else {{
-                alert('그래프 렌더러를 찾을 수 없습니다.');
-            }}
+            }});
         }});
         </script>
         </body>
+        </html>
         """
         st.components.v1.html(jpg_html, height=40)
 
