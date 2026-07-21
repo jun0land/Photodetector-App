@@ -49,13 +49,13 @@ ORIGIN_COLORS = {
 DEFAULT_TRACE_COLORS = {
     "Dark": "#000000",
     "365 nm": "#800080",
-    "405 nm": "#8000FF",
+    "405 nm": "#800080",
     "470 nm": "#0000FF",
     "530 nm": "#008000",   # Origin Olive (녹색 파장 — 사용자 확인)
     "625 nm": "#FF0000",
-    "740 nm": "#800000",
-    "850 nm": "#800080",   # Purple (ORIGIN_COLORS 에 있어 드롭다운에 Custom 아닌 Purple 로 표시)
-    "940 nm": "#808080",
+    "740 nm": "#FF0080",
+    "850 nm": "#8000FF",   # Purple (ORIGIN_COLORS 에 있어 드롭다운에 Custom 아닌 Purple 로 표시)
+    "940 nm": "#0000A0",
 }
 
 FALLBACK_CYCLE = ["#000000", "#FF0000", "#0000FF", "#00A000", "#FF00FF",

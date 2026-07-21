@@ -50,16 +50,25 @@ def _palette(ctx, tk, tr, safe):
                          help=name):
                 tr["color"] = hexv
                 st.rerun()
-    # 1. vertical_alignment="center"를 과감하게 지웁니다. (이게 어긋남의 원인입니다)
+                
+    # 👇 [추가됨] Custom 색상이 변경될 때 즉시 상태를 업데이트하고 새로고침하는 콜백 함수
+    def _update_custom_color():
+        # color_picker의 위젯 키를 통해 변경된 값을 직접 읽어옵니다.
+        picker_key = state.wkey("trace", f"{tk}.color", fid=fid)
+        tr["color"] = st.session_state[picker_key]
+        # (on_change 콜백이 실행된 후 Streamlit이 자동으로 rerun을 수행하므로 명시적 st.rerun()은 생략)
+
     c_pick, c_lbl = st.columns([1, 4])
     with c_pick:
-        tr["color"] = st.color_picker(
-            "Custom", value=tr["color"],
+        # 👇 [수정됨] on_change 파라미터를 추가하여 색상이 바뀌는 즉시 함수를 호출하게 합니다.
+        st.color_picker(
+            "Custom", 
+            value=tr["color"],
             key=state.wkey("trace", f"{tk}.color", fid=fid),
             label_visibility="collapsed",
+            on_change=_update_custom_color
         )
         
-    # 2. display: flex 와 height: 30px 를 적용해 박스 크기를 컬러 피커와 똑같이 맞춥니다.
     c_lbl.html(
         "<div style='display: flex; align-items: center; height: 30px; "
         "color: #6b6b70; font-size: 0.88rem; margin-left: -4px;'>"
