@@ -1,24 +1,4 @@
-"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7.
-
-ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
-    fid       현재 활성 파일 id
-    settings  state.file_settings(fid) — 모델이 유일한 진실
-    traces    settings["traces"] (TKey -> dict)
-    parsed    parsing.parse_file() 결과
-    fig_px    figure.px_size(geom) → (w, h)
-    domains   figure.domains(geom) → {"x0","x1","y0","y1"}
-
-성능 지표(사용자 검수 완료 식, 임의 변형 금지):
-    R(λ)  = (I_light − I_dark) / (E_e × A)                 [A/W]
-    D*(λ) = R × √A / √(2·q·I_dark)                         [Jones = cm·√Hz/W]
-전류는 동작전압 V_op 에서의 값(로그축이라 |I| 사용):
-    I_ph = |I_light(V_op)| − |I_dark(V_op)|, D* 분모의 I_dark = |I_dark(V_op)|.
-V_op 보간은 np.interp(외삽 금지 — 범위 밖이면 N/A).
-
-두 개의 진입점:
-    render(ctx)          → 데이터 요약 표 ("데이터 요약" expander)
-    render_metrics(ctx)  → R/D 입력 UI + 결과 표 + 내보내기 ("성능 지표 · 내보내기")
-"""
+"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7."""
 
 from __future__ import annotations
 
@@ -33,15 +13,11 @@ import streamlit as st
 
 from pd_app import constants, figure, state
 
-# 전자 전하량 (D* 분모). 사용자 검수 완료 상수.
 _Q_ELECTRON = 1.602e-19  # C
 
 
 # ---------------- 데이터 요약 ----------------
 def _range_i_warning(parsed) -> None:
-    """Range I 불일치 경고 (유지 대상). 레인지가 다르면 노이즈 바닥·분해능이 달라
-    곡선을 나란히 비교할 수 없다 — 조용히 넘기면 안 되는 값이다.
-    """
     traces = parsed["traces"]
     uniq = sorted({t["range_i"] for t in traces if t["range_i"]})
     if len(uniq) <= 1:
@@ -54,9 +30,6 @@ def _range_i_warning(parsed) -> None:
 
 
 def _rows(ctx) -> list[dict]:
-    """요약 표의 행. 레전드는 사용자가 편집한 값(settings)이 있으면 그것을 보여준다 —
-    화면의 인셋과 같은 글자여야 사용자가 행을 알아본다.
-    """
     rows = []
     seen: dict[str, int] = {}
     for t in ctx.parsed["traces"]:
@@ -107,12 +80,11 @@ def _current_at(df, v_op):
     order = np.argsort(v)
     v, i = v[order], i[order]
     if v_op < v[0] or v_op > v[-1]:
-        return None  # 외삽 금지 → N/A
+        return None
     return float(np.interp(v_op, v, i))
 
 
 def _dark_current_at(parsed, v_op):
-    """|I_dark(V_op)|. 모든 Dark 트레이스를 계산용으로만 concat 후 보간."""
     darks = [t["df"] for t in parsed["traces"]
              if t["label"] == "Dark" and t["df"] is not None and len(t["df"])]
     if not darks:
@@ -178,7 +150,6 @@ def _fmt(x) -> str:
     return "N/A" if x is None else f"{x:.3e}"
 
 
-# ---------------- 성능 지표 UI ----------------
 def _metrics_inputs(ctx) -> None:
     fid = ctx.fid
     m = _metrics_of(ctx.settings)
@@ -234,41 +205,6 @@ def _metrics_table(ctx):
     return rows
 
 
-# ---------------- 고성능 고해상도 이미지 내보내기 연산 ----------------
-def _export_png(fig) -> bytes:
-    """figure을 받아 투명 배경을 강제 주입하고 고화질 3배 스케일 바이너리로 구워냅니다."""
-    fig.update_layout(
-        paper_bgcolor="rgba(0,0,0,0)",  # 💡 완전 투명 배경화
-        plot_bgcolor="white"            # 플롯 내부 격자판은 깔끔하게 흰색 유지
-    )
-    return fig.to_image(format="png", scale=3)
-
-
-def _export_jpg(fig) -> bytes:
-    """figure을 받아 안전한 흰색 배경을 강제 주입하고 고화질 3배 스케일 바이너리로 구워냅니다."""
-    fig.update_layout(
-        paper_bgcolor="white",
-        plot_bgcolor="white"
-    )
-    return fig.to_image(format="jpeg", scale=3)
-
-
-@st.cache_data(max_entries=2, show_spinner=False)
-def _export_png_cached(_fig, sig: str) -> bytes:
-    """UI 지연 현상을 철저히 차단하는 투명 PNG 캐시 제어 유닛."""
-    return _export_png(_fig)
-
-
-@st.cache_data(max_entries=2, show_spinner=False)
-def _export_jpg_cached(_fig, sig: str) -> bytes:
-    """UI 지연 현상을 철저히 차단하는 흰색 JPG 캐시 제어 유닛."""
-    return _export_jpg(_fig)
-
-
-def _sig(ctx) -> str:
-    return json.dumps([ctx.fid, ctx.settings], sort_keys=True, default=str)
-
-
 def _stem(fid) -> str:
     f = state.S()["files"].get(fid) or {}
     return str(f.get("name", "graph")).rsplit(".", 1)[0] or "graph"
@@ -298,10 +234,8 @@ def _report_csv(ctx, metric_rows) -> bytes:
     return buf.getvalue().encode("utf-8-sig")
 
 
-# pd_app/ui/summary.py 파일 내부
-
+# ---------------- 내보내기 ----------------
 def _export(ctx, metric_rows) -> None:
-    """리포트 CSV 다운로드 및 고해상도 이미지 내보내기 트리거 패널."""
     st.download_button(
         "📊 요약 · 지표 CSV 다운로드",
         data=_report_csv(ctx, metric_rows),
@@ -310,128 +244,83 @@ def _export(ctx, metric_rows) -> None:
         use_container_width=True
     )
 
-    # 💡 [핵심 해결] Kaleido 엔진의 MathJax 버그를 피해, 프론트엔드 Plotly JS 기능을 트리거합니다.
-    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
-    c_png, c_jpg = st.columns(2)
+    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi · 흰색 배경)</b>", unsafe_allow_html=True)
     
+    # 💡 [핵심 해결] 내보내기 전용 완벽한 10x8(스케일 1.0) 비율의 숨겨진 백그라운드 그래프를 하나 더 생성합니다.
+    try:
+        # px_scale=1.0 강제 적용으로 여백 깨짐 현상 원천 차단
+        export_fig = figure.build_figure(ctx.fid, px_scale=1.0)
+        export_fig.update_layout(paper_bgcolor="white", plot_bgcolor="white")
+        
+        # 화면에 보이지 않는 (height=0, 넓이 0) 컨테이너 안에 렌더링
+        with st.container():
+            st.plotly_chart(
+                export_fig,
+                key=f"export_hidden_plot_{ctx.fid}",
+                config={"displayModeBar": False, "responsive": False},
+                # CSS를 이용해 뷰포트에서 이 객체를 완전히 숨깁니다.
+                use_container_width=False,
+                height=0
+            )
+            st.html(f"<style>div[data-testid='stPlotlyChart']:has(div[id*='export_hidden_plot_{ctx.fid}']) {{ display: none !important; height: 0px !important; margin: 0 !important; padding: 0 !important; }}</style>")
+            
+    except Exception as e:
+        st.error("내보내기용 그래프 준비 중 오류가 발생했습니다.")
+        return
+
+    c_png, c_jpg = st.columns(2)
     stem_name = _stem(ctx.fid)
+    accent_color = "#ed542b"
 
-    with c_png:
-        # Plotly.downloadImage 를 강제로 실행시키는 JS 주입 버튼
-        png_btn = f"""
-        <button onclick="
-            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
-            if(iframe) {{
-                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
-                if(plotlyDiv) {{
-                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }} else {{
-                // Fallback for native plot
-                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-                if(plots.length > 0) {{
-                    var Plotly = window.parent.Plotly;
-                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }}
-        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
-        🖼️ PNG (투명 배경) 다운로드
-        </button>
-        """
-        st.components.v1.html(png_btn, height=45)
-
-    with c_jpg:
-        jpg_btn = f"""
-        <button onclick="
-            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
-            if(iframe) {{
-                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
-                if(plotlyDiv) {{
-                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }} else {{
-                // Fallback for native plot
-                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-                if(plots.length > 0) {{
-                    var Plotly = window.parent.Plotly;
-                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }}
-        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
-        📷 JPG (흰색 배경) 다운로드
-        </button>
-        """
-        st.components.v1.html(jpg_btn, height=45)
-
-    w_in = float(ctx.settings["geom"]["page_w_in"])
-    h_in = float(ctx.settings["geom"]["page_h_in"])
-    st.caption(
-        f"※ **출력 해상도 정보**: 화면 미리보기 배율과 무관하게, 연구실 설정에 명시된 "
-        f"네이티브 **{w_in:g}×{h_in:g} 인치** 크기를 정확히 유지한 채 **3배 고화질 스케일(300 dpi 상당)**로 영구 추출됩니다."
-    )# pd_app/ui/summary.py 파일 내부
-
-def _export(ctx, metric_rows) -> None:
-    """리포트 CSV 다운로드 및 고해상도 이미지 내보내기 트리거 패널."""
-    st.download_button(
-        "📊 요약 · 지표 CSV 다운로드",
-        data=_report_csv(ctx, metric_rows),
-        file_name=f"{_stem(ctx.fid)}_report.csv",
-        mime="text/csv",
-        use_container_width=True
+    btn_style = (
+        "width:100%; height:38px; margin:0; padding:0; "
+        "background-color:rgb(255, 255, 255); color:rgb(49, 51, 63); "
+        "border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; "
+        "cursor:pointer; font-size:14px; font-weight:400; "
+        "font-family:-apple-system, BlinkMacSystemFont, \\'Segoe UI\\', Roboto, Helvetica, Arial, sans-serif; "
+        "display:inline-flex; align-items:center; justify-content:center; "
+        "transition: border-color 0.15s ease, color 0.15s ease; box-sizing:border-box;"
     )
-
-    # 💡 [핵심 해결] Kaleido 엔진의 MathJax 버그를 피해, 프론트엔드 Plotly JS 기능을 트리거합니다.
-    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
-    c_png, c_jpg = st.columns(2)
     
-    stem_name = _stem(ctx.fid)
+    on_hover = f"this.style.borderColor=\\'{accent_color}\\'; this.style.color=\\'{accent_color}\\';"
+    on_leave = "this.style.borderColor=\\'rgba(49, 51, 63, 0.2)\\'; this.style.color=\\'rgb(49, 51, 63)\\';"
 
     with c_png:
-        # Plotly.downloadImage 를 강제로 실행시키는 JS 주입 버튼
+        # 💡 [핵심 해결] 미리보기 화면(첫 번째 plot)이 아니라, 방금 만든 숨겨진 원본 스케일 그래프(두 번째 plot)를 타겟팅하여 캡처합니다.
         png_btn = f"""
+        <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button onclick="
-            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
-            if(iframe) {{
-                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
-                if(plotlyDiv) {{
-                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }} else {{
-                // Fallback for native plot
-                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-                if(plots.length > 0) {{
-                    var Plotly = window.parent.Plotly;
-                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
+            var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+            // 숨겨진 두 번째 플롯(원본 비율)을 찾아서 캡처
+            var targetPlot = plots.length > 1 ? plots[plots.length - 1] : (plots.length > 0 ? plots[0] : null);
+            if(targetPlot) {{
+                var Plotly = window.parent.Plotly;
+                if(Plotly) Plotly.downloadImage(targetPlot, {{format: 'png', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
             }}
-        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
-        🖼️ PNG (투명 배경) 다운로드
+        " style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
+        🖼️ PNG 다운로드
         </button>
+        </body>
         """
-        st.components.v1.html(png_btn, height=45)
+        st.components.v1.html(png_btn, height=40)
 
     with c_jpg:
         jpg_btn = f"""
+        <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
         <button onclick="
-            var iframe = window.parent.document.querySelector('iframe[title=\\'streamlit_plotly_events.plotly_chart\\']');
-            if(iframe) {{
-                var plotlyDiv = iframe.contentWindow.document.querySelector('.js-plotly-plot');
-                if(plotlyDiv) {{
-                    iframe.contentWindow.Plotly.downloadImage(plotlyDiv, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
-            }} else {{
-                // Fallback for native plot
-                var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
-                if(plots.length > 0) {{
-                    var Plotly = window.parent.Plotly;
-                    if(Plotly) Plotly.downloadImage(plots[0], {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
-                }}
+            var plots = window.parent.document.querySelectorAll('.js-plotly-plot');
+            // 숨겨진 두 번째 플롯(원본 비율)을 찾아서 캡처
+            var targetPlot = plots.length > 1 ? plots[plots.length - 1] : (plots.length > 0 ? plots[0] : null);
+            if(targetPlot) {{
+                var Plotly = window.parent.Plotly;
+                if(Plotly) Plotly.downloadImage(targetPlot, {{format: 'jpeg', height: 768, width: 960, scale: 3, filename: '{stem_name}'}});
             }}
-        " style="width:100%; padding:0.5rem; background:#fff; border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; cursor:pointer; font-size:14px;">
-        📷 JPG (흰색 배경) 다운로드
+        " style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
+        📷 JPG 다운로드
         </button>
+        </body>
         """
-        st.components.v1.html(jpg_btn, height=45)
+        st.components.v1.html(jpg_btn, height=40)
 
     w_in = float(ctx.settings["geom"]["page_w_in"])
     h_in = float(ctx.settings["geom"]["page_h_in"])
@@ -443,13 +332,11 @@ def _export(ctx, metric_rows) -> None:
 
 # ---------------- 진입점 ----------------
 def render(ctx) -> None:
-    """데이터 요약 ("데이터 요약" expander)."""
     _range_i_warning(ctx.parsed)
     _table(ctx)
 
 
 def render_metrics(ctx) -> None:
-    """성능 지표 + 내보내기 ("성능 지표 · 내보내기" expander)."""
     _metrics_inputs(ctx)
     st.markdown("---")
     metric_rows = _metrics_table(ctx)

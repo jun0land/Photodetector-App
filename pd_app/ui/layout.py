@@ -2,16 +2,9 @@
 
 `render_app()` 은 `app.py` 가 부르는 **유일한 진입점**이다 (PLAN §5.2 배치).
 
-- 헤더 (G2): 로고 + 제목 + 우측 정렬 `st.popover("＋ 파일 추가")` 안의
-  `st.file_uploader` (→ G3 버그 자체가 소멸).
-- 파일 배너 (F2): `st.segmented_control` — `st.tabs` 아님 (V13 이 여기선 역효과).
-- 본문: `st.columns([5,11])` 좌 편집패널 / 우 그래프.
-  좌 = `key="pd_edit_panel"` 안의 `st.tabs`([트레이스][축][서식][인셋][포맷]).
-      높이는 theme 의 `--pd-panel-h` 가 바인딩한다 — 768 하드코딩 금지 (C5).
-  우 = `key="pd_graph_stage"` 그래프 스테이지 (figure 960×768, 표시만 CSS 축소).
-
-각 패널에 넘길 ctx (PLAN §1.2):
-    ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
+- 헤더 (G2): 로고 + 제목 + 우측 정렬 `st.popover("＋ 파일 추가")` 안의 `st.file_uploader`.
+- 파일 배너 (F2): `st.segmented_control` — `st.tabs` 아님.
+- 본문 그리드: 3개의 독립 컬럼으로 쪼개어 [편집 패널], [그래프 스테이지], [표시 배율]의 최상단 높이를 수평 칼정렬합니다.
 """
 
 from __future__ import annotations
@@ -73,7 +66,6 @@ def show_manual() -> None:
 
 def _header() -> None:
     """로고 + 제목 (좌) · 사용 설명서 버튼 (중) · 현재 파일 제거 (우1) · ＋ 파일 추가 popover (우2)."""
-    # 상단 헤더 우측의 세 버튼이 같은 가로 크기로 배치되도록 정렬 비율을 5:1:1:1로 조정
     c_title, c_manual, c_del, c_upload = st.columns([5, 1, 1, 1], vertical_alignment="center")
 
     with c_title:
@@ -90,19 +82,14 @@ def _header() -> None:
 
     with c_del:
         s = state.S()
-        # 로드된 파일 목록이 있고, 활성화된 파일이 있는 상태에서만 제거 버튼 렌더링
         if s["order"] and state.active_fid():
             
             def _handle_header_remove():
                 target_fid = state.active_fid()
                 if target_fid:
-                    state.remove_file(target_fid)  # 내부 데이터 삭제
-                    
-                    # 1. 탭 위젯(segmented_control) 기억 초기화
+                    state.remove_file(target_fid)
                     if "pd_banner_sel" in st.session_state:
                         del st.session_state["pd_banner_sel"]
-                    
-                    # 2. 파일 업로더 내 좀비 파일 재업로드 캐시 완전 리셋
                     if "pd_file_uploader" in st.session_state:
                         del st.session_state["pd_file_uploader"]
 
@@ -127,11 +114,6 @@ def _header() -> None:
 
 
 def _ingest(uploaded) -> None:
-    """업로드된 파일을 상태에 추가. sha 로 이미 있는 파일은 건너뛴다 —
-
-    매 rerun 마다 uploader 가 같은 파일을 계속 돌려주므로, 그대로 add_file 을
-    부르면 add_file 이 active 를 매번 그 파일로 되돌려 배너 선택이 씹힌다.
-    """
     if not uploaded:
         return
     existing = {f["sha"] for f in state.S()["files"].values()}
@@ -143,8 +125,8 @@ def _ingest(uploaded) -> None:
         try:
             state.add_file(uf.name, data)
             existing.add(sha)
-        except Exception as exc:  # 파싱 실패는 표시만 하고 앱은 계속 산다
-            st.error(f"'{uf.name}' 을(를) 열지 못했습니다: {exc}")
+        except Exception as exc:
+            st.error(f"Hex '{uf.name}' 을(를) 열지 못했습니다: {exc}")
 
 
 def _banner() -> str | None:
@@ -156,7 +138,6 @@ def _banner() -> str | None:
 
     files = s["files"]
     with st.container(key="pd_banner"):
-        # 제거 버튼이 헤더 영역으로 승격 및 대칭 이동했으므로, 리스트 깨짐 없이 온전한 가로 폭으로 탭을 그립니다.
         sel = st.segmented_control(
             "파일",
             order,
@@ -181,7 +162,7 @@ def _empty_state() -> None:
 
 
 def _range_i_warning(parsed) -> None:
-    """Range I 불일치 경고 (레거시 894-899 로직 그대로) — 페이지 상단."""
+    """Range I 불일치 경고 — 페이지 상단."""
     traces = parsed["traces"]
     uniq = sorted({t["range_i"] for t in traces if t["range_i"]})
     if len(uniq) <= 1:
@@ -209,7 +190,7 @@ def _build_ctx(fid) -> SimpleNamespace:
 
 
 def _edit_panel(ctx) -> None:
-    """좌: 편집 패널. 높이는 theme 의 --pd-panel-h 가 바인딩한다 (C5: 768 금지)."""
+    """좌: 편집 패널. (불필요한 CSS 마진 코드를 완전히 걷어내어 순정 정렬 상태 유지)"""
     with st.container(key="pd_edit_panel"):
         t_tr, t_ax, t_st, t_in, t_fmt = st.tabs(
             ["트레이스", "축", "서식", "인셋", "포맷"]
@@ -227,34 +208,22 @@ def _edit_panel(ctx) -> None:
 
 
 def _display_scale() -> float:
-    """표시 배율 s. **CSS transform 대신 figure 를 s배 네이티브 축소**해 렌더한다
-
-    (라벨이 수평으로 나온다). 뷰포트 자동측정은 ResizeObserver busy 루프/rerun 루프
-    위험이 커 폐기하고, 절대 안 깨지는 number_input 으로 사용자가 조절한다.
-    첫 paint 기본값 0.72 (1536×695 에서 스크롤 없이 들어가는 값).
-    """
+    """표시 배율 s. 버튼 정렬을 위해 텍스트 라벨을 숨기고 전형적인 깔끔한 입력창 배치."""
     return float(
         st.number_input(
             "표시 배율", min_value=0.30, max_value=1.00, value=0.72, step=0.02,
             format="%.2f", key="pd_display_scale",
-            help="화면 미리보기 크기만 바꿉니다. 내보내기(PNG·HTML)는 항상 10×8인치입니다.",
+            label_visibility="visible",
+            help="화면 미리보기 크기만 바꿉니다. 내보내기(PNG·JPG)는 항상 10×8인치 정규 크기입니다.",
         )
     )
 
 
-def _graph_stage(ctx) -> None:
-    """우: 그래프 스테이지. figure 를 px_scale 로 네이티브 축소해 렌더 (transform 없음).
-
-    내보내기는 summary 가 px_scale=1.0 별도 figure 로 만든다 → 정확히 960×768.
-    """
+def _graph_stage(ctx, s: float) -> None:
+    """우: 그래프 스테이지. 외부로부터 스케일 값(s)을 상속받아 그립니다."""
     fid = ctx.fid
     stem = str(state.S()["files"][fid]["name"]).rsplit(".", 1)[0] or "graph"
 
-    c_gap, c_scale = st.columns([3, 1], vertical_alignment="bottom")
-    with c_scale:
-        s = _display_scale()
-
-    # 좌측 편집 패널 높이를 축소된 그래프 높이에 맞춘다 (단방향, busy 루프 없음)
     fig_h_px = int(round(ctx.fig_px[1] * s))
     theme.panel_height(fig_h_px)
 
@@ -264,12 +233,8 @@ def _graph_stage(ctx) -> None:
             fig,
             width="content",
             config={
-                # transform 을 안 쓰므로 plotly 는 s*960 × s*768 를 그대로 정상 레이아웃한다.
-                # responsive 는 꺼서 컬럼 폭에 맞춰 재축소되는 것만 막는다.
                 "displaylogo": False,
                 "responsive": False,
-                # 카메라 PNG 는 화면 배율(s)과 무관하게 항상 네이티브 960×768 을 scale 3
-                # 으로 내보낸다 — width/height 를 명시해 s-축소된 표시 figure 를 따르지 않게.
                 "toImageButtonOptions": {
                     "format": "png",
                     "width": int(ctx.fig_px[0]),
@@ -280,14 +245,10 @@ def _graph_stage(ctx) -> None:
             },
         )
 
-    # 로그축에서 못 그린 (<=0) 점 수
     zeros = figure.zero_count(fig)
     if zeros > 0:
-        st.caption(
-            f"로그 스케일이라 0 이하인 점 {zeros}개는 표시에서 제외되었습니다."
-        )
+        st.caption(f"로그 스케일이라 0 이하인 점 {zeros}개는 표시에서 제외되었습니다.")
 
-    # 데이터 요약 / 성능 지표·내보내기 를 별도 expander 로 분리 (둘 다 접힘 → 스크롤 최소)
     with st.expander("데이터 요약", expanded=False):
         summary.render(ctx)
     with st.expander("성능 지표 · 내보내기", expanded=False):
@@ -295,7 +256,7 @@ def _graph_stage(ctx) -> None:
 
 
 def render_app() -> None:
-    """헤더 + 파일 배너 + 좌 편집패널/우 그래프 전체를 렌더."""
+    """헤더 + 파일 배너 + [편집패널(좌) / 그래프(중) / 표시배율(우)] 전체 3분할 렌더."""
     theme.install()
 
     _header()
@@ -307,8 +268,17 @@ def render_app() -> None:
     _range_i_warning(ctx.parsed)
 
     with st.container(key="pd_body"):
-        col_l, col_r = st.columns([5, 11], gap="medium", vertical_alignment="top")
+        # 💡 [구조 변경] 가로 라인을 완벽하게 3행 구조[5:11:2] 컬럼으로 분할하여 상단을 자석처럼 일치시킵니다.
+        col_l, col_mid, col_r = st.columns([5.0, 11.0, 2.3], gap="medium", vertical_alignment="top")
+        
         with col_l:
+            # 1. 편집 패널 영역
             _edit_panel(ctx)
+            
         with col_r:
-            _graph_stage(ctx)
+            # 2. 표시 배율 영역 (독립 컬럼으로 빼서 최상단에 배치)
+            s_val = _display_scale()
+            
+        with col_mid:
+            # 3. 메인 그래프 영역 (배율 인자를 받아 렌더링)
+            _graph_stage(ctx, s_val)
