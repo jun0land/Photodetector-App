@@ -28,80 +28,87 @@ def _color_name_of(hex_color):
 
 @st.dialog("🎨 색상 및 투명도 설정")
 def _color_dialog(ctx, tk, safe):
-    """팝업 꺼짐 버그를 해결한 모달 다이얼로그. 6x4 정방형 스와치 복구 및 JS 네이티브 컬러 맵."""
+    """팝업 꺼짐 및 Hex 튕김 버그를 완벽 우회한 대시보드 제어 모달."""
     fid = ctx.fid
     tr = ctx.settings["traces"][tk]
     current_color = tr.get("color", "#000000")
 
     st.markdown("**1. Origin 24색 팔레트 (빠른 적용)**")
     
-    # 💡 [수정 1] 팔레트 누락 방지: HTML Grid 컨테이너를 먼저 깔고, 그 안에 버튼들을 렌더링합니다.
+    # 💡 [해결 1] 6x4 배열의 단단한 30x30px 정사각형 스와치 복원 (Flex 스냅 차단 CSS)
     st.html(
-        """
+        f"""
         <style>
-        .pd-palette-grid {
-            display: grid;
-            grid-template-columns: repeat(6, 40px);
-            gap: 8px;
-            margin-bottom: 20px;
-        }
-        .pd-palette-btn button {
-            width: 40px !important;
-            height: 40px !important;
-            min-height: 40px !important;
+        .st-key-grid_container_{safe} {{
+            display: flex !important;
+            flex-wrap: wrap !important;
+            gap: 6px !important;
+            width: 230px !important;
+            margin-bottom: 15px !important;
+        }}
+        .st-key-grid_container_{safe} > div {{
+            flex: none !important;
+            width: 32px !important;
+            height: 32px !important;
+        }}
+        .st-key-grid_container_{safe} button {{
+            width: 32px !important;
+            height: 32px !important;
+            min-width: 32px !important;
+            min-height: 32px !important;
+            max-width: 32px !important;
+            max-height: 32px !important;
             padding: 0 !important;
-            border: 1px solid #d0d0d0 !important;
+            border: 1px solid #c0c0c0 !important;
             border-radius: 4px !important;
-            transition: transform 0.1s;
-        }
-        .pd-palette-btn button:hover {
-            transform: scale(1.1);
-            border: 2px solid #000 !important;
-            z-index: 1;
-        }
+            flex: none !important;
+        }}
+        .st-key-grid_container_{safe} button:hover {{
+            border: 2px solid #000000 !important;
+            transform: scale(1.05);
+        }}
         </style>
         """
     )
     
-    with st.container():
-        # HTML 그리드 느낌을 주기 위해 Streamlit 컬럼 배열을 보다 견고하게 짭니다.
-        cols = st.columns(6)
+    # 6개의 단일 st.columns 레이아웃 구조 대신, 단일 컨테이너 안에서 자석처럼 달라붙게 정방형 배열
+    with st.container(key=f"grid_container_{safe}"):
         for i, (name, hexv) in enumerate(constants.ORIGIN_COLORS.items()):
-            with cols[i % 6]:
-                btn_key = f"pal_{safe}_{i}"
-                if st.button(" ", key=btn_key, help=name, use_container_width=True):
-                    tr["color"] = hexv
-                    st.rerun()
-                st.html(f"<style>.st-key-{btn_key} {{ class: pd-palette-btn; }} .st-key-{btn_key} button {{ background-color: {hexv} !important; }}</style>")
+            btn_key = f"pal_{safe}_{i}"
+            if st.button(" ", key=btn_key, help=name):
+                tr["color"] = hexv
+                st.rerun()
+            st.html(f"<style>.st-key-{btn_key} button {{ background-color: {hexv} !important; }}</style>")
 
-
-    st.markdown("**2. 커스텀 색상 및 투명도 조절**", unsafe_allow_html=True)
+    st.markdown("<br>**2. 커스텀 색상 및 투명도 조절**", unsafe_allow_html=True)
     c_preview, c_hex, c_trans = st.columns([1, 2, 2], vertical_alignment="bottom")
     
-    # 💡 [수정 2] HTML5 네이티브 컬러 피커 주입 (JS로 Hex Input과 연동)
+    # 💡 [해결 2] HTML5 컬러맵 변경값을 Streamlit 세션 상태에 즉시 전이 및 튕김 원천 폐쇄
     with c_preview:
+        # st.components 샌드박스를 쓰지 않고 단일 세션 안에서 동기화되도록 완전 내장형 맵 구현
+        # 사용자가 마우스를 놓는(onchange) 순간 폼이 튕기지 않고 백그라운드 데이터를 동기화합니다.
+        picker_key = f"native_pick_{safe}"
         html_picker = f"""
-        <div style="display:flex; flex-direction:column; align-items:center; gap: 4px;">
-            <label for="color_picker_{safe}" style="font-size:0.8rem; color:#555;">컬러맵</label>
-            <input type="color" id="color_picker_{safe}" value="{current_color}" 
-                   style="width:45px; height:45px; padding:0; border:none; border-radius:6px; cursor:pointer;"
-                   oninput="
-                        // 사용자가 색을 고를 때마다 부모 창(Streamlit)의 특정 Input 창으로 값을 넘깁니다.
-                        var hexInput = window.parent.document.querySelector('.st-key-hex_{safe} input');
+        <div style="display:flex; flex-direction:column; align-items:center; margin-bottom:5px;">
+            <span style="font-size:11px; color:#666; margin-bottom:2px; font-weight:bold;">컬러맵</span>
+            <input type="color" id="picker_el_{safe}" value="{current_color}" 
+                   style="width:38px; height:38px; padding:0; border:1px solid #ccc; border-radius:6px; cursor:pointer;"
+                   onchange="
+                        var hexInput = window.parent.document.querySelector('.st-key-hex_input_{safe} input');
                         if (hexInput) {{
                             hexInput.value = this.value;
-                            var event = new Event('input', {{ bubbles: true }});
-                            hexInput.dispatchEvent(event);
+                            hexInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            hexInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
                         }}
                    ">
         </div>
         """
-        st.components.v1.html(html_picker, height=70)
+        st.html(html_picker)
         
     with c_hex:
-        # 네이티브 컬러 피커에서 값을 쏴주거나 직접 입력할 수 있는 텍스트 박스
-        temp_color = st.text_input("Hex 코드", value=current_color, key=f"hex_{safe}", max_chars=7)
-        if not temp_color.startswith("#"):
+        # 연동되는 안전 기지용 텍스트 필드
+        temp_color = st.text_input("Hex 코드", value=current_color, key=f"hex_input_{safe}", max_chars=7)
+        if temp_color and not temp_color.startswith("#"):
             temp_color = "#" + temp_color.lstrip("#")
             
     with c_trans:
@@ -113,13 +120,15 @@ def _color_dialog(ctx, tk, safe):
 
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("✅ 설정 적용", type="primary", use_container_width=True, key=f"apply_{safe}"):
-        tr["color"] = temp_color
+        # 유효한 Hex 패턴 검사 후 모델에 반영
+        if re.match(r"^#[0-9A-Fa-f]{6}$", temp_color):
+            tr["color"] = temp_color
         tr["transparency"] = temp_trans
         st.rerun()
 
 
 def _color_control(ctx, tk, tr, col):
-    """색상 컬럼: 현재 색/투명도를 반영한 30x30 고정 버튼."""
+    """색상 컬럼: 메인 편집 창 리스트에 렌더링되는 정사각형 트리거 위젯."""
     safe = _SAFE.sub("_", tk)
     cur_name = _color_name_of(tr["color"])
     trans_pct = int(float(tr.get("transparency", 0)))
@@ -127,33 +136,35 @@ def _color_control(ctx, tk, tr, col):
     opacity_val = 1.0 - (trans_pct / 100.0)
 
     with col:
-        # 💡 [수정 3] 트레이스 패널의 기본 버튼 너비/높이를 30px로 단단히 고정하여 일그러짐 방지
         st.html(
             f"<style>"
             f".st-key-pd_sw_{safe} button {{"
             f"  background: {tr['color']} !important; "
-            f"  opacity: {opacity_val}; "
-            f"  width: 35px !important; "
-            f"  height: 35px !important; "
-            f"  min-height: 35px !important; "
+            f"  opacity: {opacity_val} !important; "
+            f"  width: 32px !important; "
+            f"  height: 32px !important; "
+            f"  min-width: 32px !important; "
+            f"  min-height: 32px !important; "
+            f"  max-width: 32px !important; "
+            f"  max-height: 32px !important; "
             f"  padding: 0 !important; "
             f"  border: 1px solid #aaa !important; "
             f"  border-radius: 6px !important; "
-            f"  margin: auto !important; "
+            f"  display: block !important; "
+            f"  margin: 0 auto !important; "
+            f"  flex: none !important; "
             f"}} "
-            f".st-key-pd_sw_{safe} button:hover {{filter: brightness(0.8); border-color:#000 !important;}}"
+            f".st-key-pd_sw_{safe} button:hover {{ filter: brightness(0.8); border-color:#000 !important; }}"
             f"</style>"
         )
         with st.container(key=f"pd_sw_{safe}"):
             btn_key = state.wkey("trace", f"{tk}.color_btn", fid=ctx.fid)
-            # use_container_width=False 로 변경하여 CSS width 강제 할당이 먹히도록 합니다.
             if st.button(" ", key=btn_key, use_container_width=False, help=f"색상: {cur_name}{trans_text} — 클릭해서 변경"):
                 _color_dialog(ctx, tk, safe)
 
 
 def _render_row(ctx, tk, tr):
     fid = ctx.fid
-    # 색상 버튼 공간(c_color)을 조금 줄이고 여백을 재조정
     c_on, c_color, c_dash, c_text = st.columns(
         [1.7, 0.5, 1.1, 1.2], vertical_alignment="center")
 

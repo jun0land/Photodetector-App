@@ -88,7 +88,7 @@ html, body, [class*="css"], .stApp, button, input, textarea, select {{
 /* 밀도: 기본 상단 여백(~6rem)이 과해서 한 화면 정보량을 깎는다.
    G1(스크롤 최소화)이 최우선이므로 세로 여백을 특히 줄인다. */
 .main .block-container, [data-testid="stAppViewContainer"] .block-container {{
-    padding-top: 4rem !important;
+    padding-top: 2rem !important;
     padding-bottom: 0.6rem !important;
     padding-left: 1.6rem !important;
     padding-right: 1.6rem !important;
