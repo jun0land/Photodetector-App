@@ -142,15 +142,23 @@ def _color_control(ctx, tk, tr, col):
                 _color_dialog(ctx, tk, safe)
 
 
-def _render_row(ctx, tk, tr):
+def _range_i_by_tk(ctx) -> dict:
+    """parsed 트레이스의 range_i 를 settings 트레이스 키(tk)에 매핑."""
+    out, seen = {}, {}
+    for t in ctx.parsed["traces"]:
+        seen[t["label"]] = seen.get(t["label"], 0) + 1
+        out[state.tkey_of(t, seen[t["label"]])] = t.get("range_i")
+    return out
+
+
+def _render_row(ctx, tk, tr, ri_suffix=""):
     fid = ctx.fid
     c_on, c_color, c_dash, c_text = st.columns(
         [1.7, 0.5, 1.1, 1.2], vertical_alignment="center")
 
     tr["visible"] = c_on.checkbox(
-        tr["label"], value=bool(tr["visible"]),
+        tr["label"] + ri_suffix, value=bool(tr["visible"]),
         key=state.wkey("trace", f"{tk}.visible", fid=fid),
-        help="그래프에 이 트레이스를 표시합니다.",
     )
 
     _color_control(ctx, tk, tr, c_color)
@@ -178,13 +186,23 @@ def render(ctx) -> None:
         return
 
     h_on, h_color, h_dash, h_text = st.columns([1.7, 0.5, 1.1, 1.2])
-    h_on.caption("표시")
+    h_on.caption(
+        "표시",
+        help="측정에 사용된 Range I(전류 레인지)가 트레이스마다 다를 경우에만, "
+             "구분용으로 각 트레이스 이름 옆에 그 값이 표시됩니다. "
+             "모두 같으면 표시되지 않습니다. (그래프·인셋에는 영향 없음)",
+    )
     h_color.caption("색상")
     h_dash.caption("선 종류")
     h_text.caption("텍스트")
 
+    # Range I 가 서로 다를 때만 구분용으로 라벨에 표기 (인셋/레전드에는 영향 없음)
+    ri_map = _range_i_by_tk(ctx)
+    show_ri = len({v for v in ri_map.values() if v}) > 1
+
     for tk, tr in traces.items():
-        _render_row(ctx, tk, tr)
+        ri_suffix = f"  ·  {ri_map.get(tk) or 'N/A'}" if show_ri else ""
+        _render_row(ctx, tk, tr, ri_suffix)
 
     n_on = sum(1 for t in traces.values() if t["visible"])
     st.caption(f"{n_on} / {len(traces)} 개 표시 중")
