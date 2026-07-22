@@ -4,6 +4,8 @@
 _sheet_sort_key, _is_data_sheet.
 """
 
+from __future__ import annotations
+
 import contextlib
 import io
 import re
@@ -14,6 +16,7 @@ import pandas as pd
 import streamlit as st
 
 from pd_app.constants import SEP_TOKEN, SYMBOL_MAP
+
 
 def _sheet_sort_key(name):
     """'Data' 먼저, 그 다음 Append 뒤 숫자 기준 정렬 (Append10 > Append9)."""
@@ -102,19 +105,13 @@ def _settings_frame(file_bytes, sheets, engine):
 
 
 def _parse_settings(df):
-    """Settings 프레임에서 블록별 'Range I' 추출.
-
-    실제 장비 파일은 블록이 역순(Append 7 ... Initial Run)이고 첫 행이 구분선이다.
-    블록 이름으로 매칭하므로 순서와 무관하며, 헤더 없는 레이아웃도 위치 기반으로 처리.
-    """
+    """Settings 프레임에서 블록별 'Range I' 추출."""
     result = {}
     order = []
     if not isinstance(df, pd.DataFrame) or df.shape[1] < 1 or df.empty:
         return result, order
 
     rows = []
-    # header=None 이면 컬럼이 0,1,2.. 정수 -> 주입 불필요.
-    # header=0 로 읽혀 첫 행이 컬럼명으로 소비된 경우에만 데이터 행으로 복원.
     cols = list(df.columns)
     if not all(isinstance(c, (int, np.integer)) or str(c).startswith("Unnamed") for c in cols):
         rows.append([str(c) for c in cols])
@@ -159,13 +156,37 @@ def _parse_settings(df):
     return result, order
 
 
+# 💡 [신규 추가] Dark 0V 영점 오프셋(I_offset) 보정 함수
+def _apply_dark_zero_offset_correction(traces: list[dict]) -> None:
+    """Dark Current의 0V 지점 오프셋(I_offset)을 추출하여 모든 트레이스(Dark + Photo)에서 일괄 차감합니다."""
+    i_offset = None
+
+    # 1. Dark 트레이스에서 V = 0V 에 가장 가까운 지점의 전류값(I_offset) 검색
+    for t in traces:
+        if t.get("label") == "Dark" and t.get("df") is not None and not t["df"].empty:
+            df = t["df"]
+            if "AnodeV" in df.columns and "AnodeI" in df.columns:
+                # 0V에 가장 가까운 행 검색
+                min_v_idx = (df["AnodeV"].abs()).idxmin()
+                # 0V와 가까운 지점(예: 0.05V 이내)인 경우 오프셋으로 인정
+                if abs(df.loc[min_v_idx, "AnodeV"]) < 0.05:
+                    i_offset = float(df.loc[min_v_idx, "AnodeI"])
+                    break
+
+    # 2. Dark 0V 오프셋이 발견된 경우, 모든 트레이스(Dark & Photo)의 AnodeI 데이터에서 일괄 차감
+    if i_offset is not None and i_offset != 0.0:
+        for t in traces:
+            if t.get("df") is not None and not t["df"].empty:
+                if "AnodeI" in t["df"].columns:
+                    t["df"]["AnodeI"] = t["df"]["AnodeI"] - i_offset
+
+
 @st.cache_data(show_spinner=False)
 def parse_file(file_bytes, file_name):
     """파일 바이트 -> 트레이스 목록. UploadedFile 대신 bytes 로 캐싱."""
     sheets, engine = _load_sheets(file_bytes)
     warns = []
 
-    # 'Calc' 처럼 비어 있는(0x0) 시트가 실제로 존재 -> 컬럼 검사로 걸러진다
     data_names = [n for n, d in sheets.items() if _is_data_sheet(d)]
     data_names.sort(key=_sheet_sort_key)
     if not data_names:
@@ -175,13 +196,10 @@ def parse_file(file_bytes, file_name):
     for n in data_names:
         d = sheets[n].copy()
         d.columns = [str(c).strip() for c in d.columns]
-        # 실제 파일은 컬럼 순서가 [AnodeI, AnodeV] 라 이름으로 접근해야 한다
         d = d[["AnodeV", "AnodeI"]].apply(pd.to_numeric, errors="coerce").dropna()
         frames[n] = d
 
     range_map, _ = _parse_settings(_settings_frame(file_bytes, sheets, engine))
-    # 이름 매칭 실패 시: 순서 기반 추측은 하지 않는다.
-    # 실제 장비가 블록을 역순으로 쓰므로 위치 매칭은 조용히 뒤집힌 값을 줄 수 있다.
     if range_map and not any(n in range_map for n in data_names):
         warns.append(
             "Settings 블록 이름을 데이터 시트와 매칭하지 못했습니다. "
@@ -205,7 +223,6 @@ def parse_file(file_bytes, file_name):
     else:
         labels = [f"Trace {i + 1}" for i in range(len(data_names))]
 
-    # 데이터 시트 1:1 트레이스 (Dark 를 여러 번 측정하므로 병합하지 않음)
     traces = []
     for i, n in enumerate(data_names):
         traces.append({
@@ -215,11 +232,13 @@ def parse_file(file_bytes, file_name):
             "sheets": [n],
         })
 
-    # 중복 라벨 구분 (Dark #2, 940nm #2 ... 레전드 개별 토글용 고유 이름)
     seen = {}
     for t in traces:
         seen[t["label"]] = seen.get(t["label"], 0) + 1
         suffix = "" if seen[t["label"]] == 1 else f" #{seen[t['label']]}"
         t["legend"] = f"{t['label']} ({t['range_i']}){suffix}"
+
+    # 💡 [핵심 추가] 파싱된 traces 데이터에 Dark 0V 영점 오프셋 자동 차감 보정 적용
+    _apply_dark_zero_offset_correction(traces)
 
     return {"traces": traces, "warnings": warns, "data_names": data_names}
