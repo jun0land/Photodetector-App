@@ -375,25 +375,19 @@ def _bulk_image_html(items, fmt: str, btn_id: str, label: str) -> str:
 
 
 def render_bulk_export(ctxs) -> None:
-    """열려 있는 모든 파일 일괄 내보내기 — 성능지표 CSV 1개 + PNG/JPG 개별 다운로드 버튼."""
+    """열려 있는 모든 파일 일괄 내보내기 — 성능지표 CSV 1개 + PNG/JPG 개별 다운로드 버튼 (세로 배치)."""
     if len(ctxs) < 2:
-        st.caption("파일이 2개 이상일 때 일괄 내보내기를 사용할 수 있습니다.")
         return
-    st.caption(
-        f"열려 있는 **{len(ctxs)}개 파일**을 한 번에 내보냅니다. 이미지는 파일마다 개별 저장되며, "
-        "브라우저가 여러 파일 다운로드 허용을 물으면 **허용**해 주세요."
-    )
-    c1, c2, c3 = st.columns(3)
+    st.caption(f"🗂 전체 {len(ctxs)}개 파일 일괄 내보내기")
 
-    with c1:
-        st.download_button(
-            "📊 성능지표 일괄 CSV",
-            data=_bulk_report_csv(ctxs),
-            file_name="photodetector_bulk_report.csv",
-            mime="text/csv",
-            use_container_width=True,
-            key="pd_bulk_csv",
-        )
+    st.download_button(
+        "📊 성능지표 일괄 CSV",
+        data=_bulk_report_csv(ctxs),
+        file_name="photodetector_bulk_report.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="pd_bulk_csv",
+    )
 
     png_items, jpg_items = [], []
     for ctx in ctxs:
@@ -404,18 +398,17 @@ def render_bulk_export(ctxs) -> None:
         except Exception:
             continue
 
-    with c2:
-        st.components.v1.html(
-            _bulk_image_html(png_items, "png", "btn-bulk-png",
-                             f"🖼️ 일괄 PNG (투명) · {len(png_items)}개"),
-            height=46,
-        )
-    with c3:
-        st.components.v1.html(
-            _bulk_image_html(jpg_items, "jpeg", "btn-bulk-jpg",
-                             f"📷 일괄 JPG (흰 배경) · {len(jpg_items)}개"),
-            height=46,
-        )
+    st.components.v1.html(
+        _bulk_image_html(png_items, "png", "btn-bulk-png",
+                         f"🖼️ 일괄 PNG (투명) · {len(png_items)}개"),
+        height=46,
+    )
+    st.components.v1.html(
+        _bulk_image_html(jpg_items, "jpeg", "btn-bulk-jpg",
+                         f"📷 일괄 JPG (흰 배경) · {len(jpg_items)}개"),
+        height=46,
+    )
+    st.caption("이미지는 파일마다 개별 저장됩니다. 브라우저가 다중 다운로드를 물으면 허용하세요.")
 
 
 # ---------------- 내보내기 ----------------

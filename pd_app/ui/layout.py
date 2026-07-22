@@ -261,16 +261,15 @@ def render_app() -> None:
     ctx = _build_ctx(fid)
     _range_i_warning(ctx.parsed)
 
-    if len(state.S()["order"]) >= 2:
-        with st.expander("🗂 전체 파일 일괄 내보내기", expanded=False):
-            summary.render_bulk_export([_build_ctx(f) for f in state.S()["order"]])
-
     with st.container(key="pd_body"):
         col_l, col_mid, col_r = st.columns([5.0, 11.0, 2.3], gap="medium", vertical_alignment="top")
-        
+
         with col_l:
             _edit_panel(ctx)
         with col_r:
             s_val = _display_scale()
+            if len(state.S()["order"]) >= 2:
+                st.divider()
+                summary.render_bulk_export([_build_ctx(f) for f in state.S()["order"]])
         with col_mid:
             _graph_stage(ctx, s_val)

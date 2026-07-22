@@ -124,8 +124,8 @@ DEFAULTS = {
                    "bg_opacity": 1.0,
                    # font: None = style.font_family 상속
                    "font": None, "font_size": 30},
-        # 트레이스 레전드 인셋이 좌측 하단이므로 샘플 이름은 우측 하단에 둔다.
-        "sample": {"x": 0.96, "y": 0.06, "xanchor": "right", "yanchor": "bottom",
+        # 트레이스 레전드 인셋(좌측 하단, 여백 0.01/0.005)과 대칭이 되게 우측 하단에 둔다.
+        "sample": {"x": 0.99, "y": 0.005, "xanchor": "right", "yanchor": "bottom",
                    "text_raw": "", "font_size": 30},
     },
     "use_abs": True,
