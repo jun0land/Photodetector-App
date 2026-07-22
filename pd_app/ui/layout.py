@@ -119,6 +119,7 @@ def _ingest(uploaded) -> None:
     if not uploaded:
         return
     existing = {f["sha"] for f in state.S()["files"].values()}
+    added = False
     for uf in uploaded:
         data = uf.getvalue()
         sha = hashlib.sha1(data).hexdigest()
@@ -127,8 +128,15 @@ def _ingest(uploaded) -> None:
         try:
             state.add_file(uf.name, data)
             existing.add(sha)
+            added = True
         except Exception as exc:
             st.error(f"'{uf.name}' 을(를) 열지 못했습니다: {exc}")
+
+    # add_file 이 새 파일을 활성으로 잡지만, 배너 segmented_control 의 key 가 이미 있으면
+    # Streamlit 이 default= 를 무시해 옛 파일이 계속 선택된 것처럼 보인다(제거 경로와 동일
+    # 함정). 키를 지워 다음 렌더에서 새 활성 파일이 default 로 선택되게 한다.
+    if added and "pd_banner_sel" in st.session_state:
+        del st.session_state["pd_banner_sel"]
 
 
 def _banner() -> str | None:
