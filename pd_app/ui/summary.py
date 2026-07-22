@@ -1,4 +1,7 @@
-"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7."""
+"""데이터 요약 + 성능 지표(Responsivity/Detectivity) + 내보내기. 소유: WP7.
+
+ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
+"""
 
 from __future__ import annotations
 
@@ -96,7 +99,8 @@ def _dark_current_at(parsed, v_op):
 
 def _metrics_of(settings):
     m = settings.setdefault("metrics", copy.deepcopy(constants.DEFAULTS["metrics"]))
-    m.setdefault("v_op", -1.0)
+    m.setdefault("v_op1", -1.0)
+    m.setdefault("v_op2", 1.0)
     m.setdefault("area", 1.0)
     m.setdefault("area_unit", "cm2")
     if not isinstance(m.get("irradiance"), dict):
@@ -116,13 +120,18 @@ def _wavelength_labels(parsed):
 
 
 def _compute_metrics(ctx):
-    rows, i_dark_abs, v_op, area_cm2 = [], None, -1.0, 1.0
+    """V_op1, V_op2 두 전압에서의 파장별 R, D* 동시 계산."""
+    rows, i_dark_abs1, i_dark_abs2 = [], None, None
+    v_op1, v_op2, area_cm2 = -1.0, 1.0, 1.0
     try:
         m = _metrics_of(ctx.settings)
-        v_op = float(m["v_op"])
+        v_op1 = float(m.get("v_op1", -1.0))
+        v_op2 = float(m.get("v_op2", 1.0))
         area_cm2 = float(m["area"]) * (1e-2 if m["area_unit"] == "mm2" else 1.0)
         irr = m["irradiance"]
-        i_dark_abs = _dark_current_at(ctx.parsed, v_op)
+
+        i_dark_abs1 = _dark_current_at(ctx.parsed, v_op1)
+        i_dark_abs2 = _dark_current_at(ctx.parsed, v_op2)
 
         df_by_label = {}
         for t in ctx.parsed["traces"]:
@@ -131,19 +140,36 @@ def _compute_metrics(ctx):
 
         for label in _wavelength_labels(ctx.parsed):
             ee = irr.get(label)
-            i_light = _current_at(df_by_label.get(label), v_op)
-            R = D = None
-            if (ee is not None and ee > 0 and area_cm2 > 0
-                    and i_light is not None and i_dark_abs is not None):
-                ee_w = float(ee) * 1e-3
-                i_ph = abs(i_light) - i_dark_abs
-                R = i_ph / (ee_w * area_cm2)
-                if i_dark_abs > 0:
-                    D = R * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs)
-            rows.append({"파장": label, "E_e": ee, "R": R, "D": D})
+            i_light1 = _current_at(df_by_label.get(label), v_op1)
+            i_light2 = _current_at(df_by_label.get(label), v_op2)
+
+            R1 = D1 = R2 = D2 = None
+            if ee is not None and ee > 0 and area_cm2 > 0:
+                ee_w = float(ee) * 1e-3  # mW/cm² → W/cm²
+
+                # V_op1 계산 (-1V 기본)
+                if i_light1 is not None and i_dark_abs1 is not None:
+                    i_ph1 = abs(i_light1) - i_dark_abs1
+                    R1 = i_ph1 / (ee_w * area_cm2)
+                    if i_dark_abs1 > 0:
+                        D1 = R1 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs1)
+
+                # V_op2 계산 (+1V 기본)
+                if i_light2 is not None and i_dark_abs2 is not None:
+                    i_ph2 = abs(i_light2) - i_dark_abs2
+                    R2 = i_ph2 / (ee_w * area_cm2)
+                    if i_dark_abs2 > 0:
+                        D2 = R2 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs2)
+
+            rows.append({
+                "파장": label,
+                "E_e": ee,
+                "R_v1": R1, "D_v1": D1,
+                "R_v2": R2, "D_v2": D2
+            })
     except Exception:
         pass
-    return rows, i_dark_abs, v_op, area_cm2
+    return rows, i_dark_abs1, i_dark_abs2, v_op1, v_op2, area_cm2
 
 
 def _fmt(x) -> str:
@@ -154,18 +180,22 @@ def _metrics_inputs(ctx) -> None:
     fid = ctx.fid
     m = _metrics_of(ctx.settings)
 
-    c1, c2, c3 = st.columns([1.2, 1.2, 1])
-    m["v_op"] = c1.number_input(
-        "동작전압 V_op (V)", value=float(m["v_op"]), step=0.1, format="%g",
-        key=state.wkey("metrics", "v_op", fid=fid),
+    c1, c2, c3, c4 = st.columns([1, 1, 1.2, 1])
+    m["v_op1"] = c1.number_input(
+        "동작전압 V_op1 (V)", value=float(m.get("v_op1", -1.0)), step=0.1, format="%g",
+        key=state.wkey("metrics", "v_op1", fid=fid),
     )
-    m["area"] = c2.number_input(
+    m["v_op2"] = c2.number_input(
+        "동작전압 V_op2 (V)", value=float(m.get("v_op2", 1.0)), step=0.1, format="%g",
+        key=state.wkey("metrics", "v_op2", fid=fid),
+    )
+    m["area"] = c3.number_input(
         "수광 면적 A", min_value=0.0, value=float(m["area"]), step=0.1, format="%g",
         key=state.wkey("metrics", "area", fid=fid),
     )
     _AREA_UNITS = ["cm2", "mm2"]
     cur_u = m["area_unit"] if m["area_unit"] in _AREA_UNITS else "cm2"
-    m["area_unit"] = c3.selectbox(
+    m["area_unit"] = c4.selectbox(
         "면적 단위", _AREA_UNITS, index=_AREA_UNITS.index(cur_u),
         format_func=lambda u: {"cm2": "cm²", "mm2": "mm²"}[u],
         key=state.wkey("metrics", "area_unit", fid=fid),
@@ -190,18 +220,28 @@ def _metrics_inputs(ctx) -> None:
 
 
 def _metrics_table(ctx):
-    rows, i_dark_abs, v_op, _ = _compute_metrics(ctx)
+    rows, i_dark1, i_dark2, v_op1, v_op2, _ = _compute_metrics(ctx)
     if not rows:
         st.caption("파장 트레이스가 없어 지표를 계산할 수 없습니다.")
         return rows
+
+    v1_str = f"{v_op1:g}V"
+    v2_str = f"{v_op2:g}V"
+
     disp = pd.DataFrame([
-        {"파장": r["파장"], "R [A/W]": _fmt(r["R"]), "D* [Jones]": _fmt(r["D"])}
+        {
+            "파장": r["파장"],
+            f"R ({v1_str}) [A/W]": _fmt(r["R_v1"]),
+            f"D* ({v1_str}) [Jones]": _fmt(r["D_v1"]),
+            f"R ({v2_str}) [A/W]": _fmt(r["R_v2"]),
+            f"D* ({v2_str}) [Jones]": _fmt(r["D_v2"]),
+        }
         for r in rows
     ])
     st.dataframe(disp, width="stretch", hide_index=True,
                  height=min(38 + 35 * len(rows), 320))
-    if i_dark_abs is None:
-        st.caption("Dark 트레이스가 없거나 V_op 가 Dark 범위 밖이라 I_dark 를 구하지 못했습니다 — R/D*가 N/A 입니다.")
+    if i_dark1 is None or i_dark2 is None:
+        st.caption("Dark 트레이스가 없거나 설정 전압이 범위 밖이라 일부 전압의 I_dark 를 구하지 못했습니다 — 해당 지표는 N/A 입니다.")
     return rows
 
 
@@ -215,19 +255,27 @@ def _report_csv(ctx, metric_rows) -> bytes:
     buf = io.StringIO()
     buf.write("# Photodetector I-V Studio — report\n")
     buf.write(f"# file,{_stem(ctx.fid)}\n")
-    buf.write(f"# V_op (V),{m['v_op']}\n")
+    buf.write(f"# V_op1 (V),{m.get('v_op1', -1.0)}\n")
+    buf.write(f"# V_op2 (V),{m.get('v_op2', 1.0)}\n")
     buf.write(f"# Area,{m['area']},{m['area_unit']}\n")
     buf.write(f"# Irradiance unit,{m.get('irr_unit', 'mW/cm2')}\n")
 
     buf.write("\n# Data summary\n")
     pd.DataFrame(_rows(ctx)).to_csv(buf, index=False)
 
+    v1_str = f"{m.get('v_op1', -1.0):g}V"
+    v2_str = f"{m.get('v_op2', 1.0):g}V"
+
     buf.write("\n# Performance metrics\n")
     mdf = pd.DataFrame([
-        {"Wavelength": r["파장"],
-         "E_e (mW/cm2)": r["E_e"],
-         "R (A/W)": r["R"],
-         "D* (Jones)": r["D"]}
+        {
+            "Wavelength": r["파장"],
+            "E_e (mW/cm2)": r["E_e"],
+            f"R_{v1_str} (A/W)": r["R_v1"],
+            f"D*_{v1_str} (Jones)": r["D_v1"],
+            f"R_{v2_str} (A/W)": r["R_v2"],
+            f"D*_{v2_str} (Jones)": r["D_v2"]
+        }
         for r in metric_rows
     ])
     mdf.to_csv(buf, index=False)
@@ -247,9 +295,7 @@ def _export(ctx, metric_rows) -> None:
     st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
     
     try:
-        # =========================================================
-        # 1. 완전 투명 PNG용 데이터 조립 (그래프 안/밖 및 인셋 투명화)
-        # =========================================================
+        # 1. 완전 투명 PNG용 데이터 조립
         png_settings = copy.deepcopy(ctx.settings)
         if "insets" in png_settings:
             if "legend" in png_settings["insets"]:
@@ -266,9 +312,7 @@ def _export(ctx, metric_rows) -> None:
         export_fig_png.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         export_json_png = export_fig_png.to_json().replace("</script>", "<\\/script>")
 
-        # =========================================================
-        # 2. 불투명 흰색 JPG용 데이터 조립 (원상 복구 후 생성)
-        # =========================================================
+        # 2. 불투명 흰색 JPG용 데이터 조립
         state.S()["files"][ctx.fid]["settings"] = original_settings
         
         export_fig_jpg = figure.build_figure(ctx.fid, px_scale=1.0)
@@ -298,7 +342,6 @@ def _export(ctx, metric_rows) -> None:
     on_leave = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
 
     with c_png:
-        # 💡 [핵심 해결] iframe 탐색 코드를 완전 삭제! 이제 버튼 자체가 Plotly.js를 들고 직접 그려서 뽑아냅니다.
         png_html = f"""
         <html>
         <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
@@ -334,7 +377,6 @@ def _export(ctx, metric_rows) -> None:
         st.components.v1.html(png_html, height=40)
 
     with c_jpg:
-        # 💡 [핵심 해결] JPG 다운로드 버튼도 마찬가지로 완벽히 격리된 자체 엔진으로 렌더링.
         jpg_html = f"""
         <html>
         <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
