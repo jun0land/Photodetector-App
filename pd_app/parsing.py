@@ -119,6 +119,7 @@ def _parse_settings(df):
         rows.append([df.iloc[i, j] for j in range(df.shape[1])])
 
     current = None
+    sweep_col = None  # 현재 블록에서 Voltage Sweep 을 수행하는 SMU 의 컬럼 인덱스
     for row in rows:
         cells = []
         for v in row:
@@ -132,14 +133,12 @@ def _parse_settings(df):
         if "=====" in joined or SEP_TOKEN in joined:
             continue
         name = cells[0]
-        # SMU1/SMU2 중 어느 컬럼이 값을 갖는지는 블록마다(Master 여부에 따라) 달라지므로
-        # 값 컬럼(1번 이후)을 모두 스캔해 비어있지 않은 첫 값을 사용한다.
-        value = next((c for c in cells[1:] if c), "")
         if not name:
             continue
 
         if re.match(r"^initial\s*run$", name, flags=re.IGNORECASE):
             current = "Data"
+            sweep_col = None
             if current not in order:
                 order.append(current)
             result.setdefault(current, "N/A")
@@ -147,12 +146,27 @@ def _parse_settings(df):
         m = re.match(r"^append\s*(\d+)$", name, flags=re.IGNORECASE)
         if m:
             current = f"Append{int(m.group(1))}"
+            sweep_col = None
             if current not in order:
                 order.append(current)
             result.setdefault(current, "N/A")
             continue
 
+        # SMU1/SMU2 중 Voltage Sweep(측정 대상)을 수행하는 컬럼을 기억해 둔다.
+        if re.match(r"^forcing\s*function$", name, flags=re.IGNORECASE) and current:
+            sweep_col = next(
+                (i for i in range(1, len(cells))
+                 if re.search(r"sweep", cells[i], flags=re.IGNORECASE)),
+                None,
+            )
+            continue
+
         if re.match(r"^range\s*i$", name, flags=re.IGNORECASE) and current:
+            value = ""
+            if sweep_col is not None and sweep_col < len(cells):
+                value = cells[sweep_col]
+            if not value:  # sweep 컬럼을 못 찾았거나 비었으면 값 컬럼 전체를 스캔
+                value = next((c for c in cells[1:] if c), "")
             result[current] = value if value else "N/A"
 
     return result, order
