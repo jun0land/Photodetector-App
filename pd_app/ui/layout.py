@@ -238,10 +238,10 @@ def _graph_stage(ctx, s: float) -> None:
     if zeros > 0:
         st.caption(f"로그 스케일이라 0 이하인 점 {zeros}개는 표시에서 제외되었습니다.")
 
-    with st.expander("데이터 요약", expanded=False):
-        summary.render(ctx)
     with st.expander("성능 지표 · 내보내기", expanded=False):
         summary.render_metrics(ctx)
+    with st.expander("데이터 요약", expanded=False):
+        summary.render(ctx)
 
 
 def render_app() -> None:
