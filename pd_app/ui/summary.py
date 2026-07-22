@@ -101,7 +101,7 @@ def _metrics_of(settings):
     m = settings.setdefault("metrics", copy.deepcopy(constants.DEFAULTS["metrics"]))
     m.setdefault("v_op1", -1.0)
     m.setdefault("v_op2", 1.0)
-    m.setdefault("area", 1.0)
+    m.setdefault("area", 0.031416)
     m.setdefault("area_unit", "cm2")
     if not isinstance(m.get("irradiance"), dict):
         m["irradiance"] = {}
@@ -189,8 +189,9 @@ def _metrics_inputs(ctx) -> None:
         "동작전압 V_op2 (V)", value=float(m.get("v_op2", 1.0)), step=0.1, format="%g",
         key=state.wkey("metrics", "v_op2", fid=fid),
     )
+    # 소수점 미세 조정을 위해 step을 0.001 로 세밀하게 설정했습니다.
     m["area"] = c3.number_input(
-        "수광 면적 A", min_value=0.0, value=float(m["area"]), step=0.1, format="%g",
+        "수광 면적 A", min_value=0.0, value=float(m["area"]), step=0.001, format="%g",
         key=state.wkey("metrics", "area", fid=fid),
     )
     _AREA_UNITS = ["cm2", "mm2"]

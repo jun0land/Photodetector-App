@@ -131,6 +131,6 @@ DEFAULTS = {
     # 성능 지표(Responsivity/Detectivity) 입력. **측정 조건이라 per-file** 이고
     # 프리셋에는 절대 들어가지 않는다 (presets.extract/apply 가 이 키를 다루지 않음).
     # irradiance 는 add_file 이 파일의 파장 라벨로 채운다 (Dark 제외, 빈 값 = None).
-    "metrics": {"v_op": -1.0, "area": 1.0, "area_unit": "cm2",
+    "metrics": {"v_op": -1.0, "area": 0.031416, "area_unit": "cm2",
                 "irr_unit": "mW/cm2", "irradiance": {}},
 }
