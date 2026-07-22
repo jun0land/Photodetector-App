@@ -132,7 +132,9 @@ def _parse_settings(df):
         if "=====" in joined or SEP_TOKEN in joined:
             continue
         name = cells[0]
-        value = cells[1] if len(cells) > 1 else ""
+        # SMU1/SMU2 중 어느 컬럼이 값을 갖는지는 블록마다(Master 여부에 따라) 달라지므로
+        # 값 컬럼(1번 이후)을 모두 스캔해 비어있지 않은 첫 값을 사용한다.
+        value = next((c for c in cells[1:] if c), "")
         if not name:
             continue
 
