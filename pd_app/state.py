@@ -94,7 +94,8 @@ def add_file(name, data):
             "width": settings["style"]["line_width"],
             "legend_raw": t["legend"],
             "inset_raw": t["label"],
-            "include_in_inset": True,
+            # 같은 파장(Dark 등)이 여러 번 측정되면 첫 등장만 인셋에 포함하고 중복은 해제한다.
+            "include_in_inset": seen[label] == 1,
         }
 
     # 성능 지표(측정 조건)는 per-file. 파장별 광조도(E_e)를 이 파일의 파장 라벨로
