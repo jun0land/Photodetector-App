@@ -103,9 +103,13 @@ def add_file(name, data):
     # irradiance 는 파일마다 파장이 다르므로 여기서 새로 만든다.
     settings.setdefault("metrics", copy.deepcopy(constants.DEFAULTS["metrics"]))
     settings["metrics"]["irradiance"] = {
-        tr["label"]: None
+        tr["label"]: 1.0
         for tr in settings["traces"].values() if tr["label"] != "Dark"
     }
+
+    # 파일명 (샘플명) 을 인셋 샘플 이름에 자동 반영 (없으면 빈 값 유지).
+    if parsed.get("sample"):
+        settings["insets"]["sample"]["text_raw"] = parsed["sample"]
 
     s["files"][fid] = {
         "fid": fid,

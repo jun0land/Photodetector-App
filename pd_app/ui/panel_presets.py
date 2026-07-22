@@ -105,17 +105,21 @@ def render(ctx) -> None:
     preset = presets.extract(fid, name, include_style=inc_style, include_geom=inc_geom)
 
     c1, c2 = st.columns(2)
-    if c1.button("프리셋으로 저장", use_container_width=True,
-                 key=state.wkey("preset", "save", fid=fid)):
+    if c1.button("앱에 저장 (임시)", use_container_width=True,
+                 key=state.wkey("preset", "save", fid=fid),
+                 help="현재 브라우저 세션의 프리셋 목록에 담습니다. 새로고침·재접속하면 사라지므로 "
+                      "영구 보관은 오른쪽 '파일로 내보내기'를 쓰세요."):
         s["presets"][name] = copy.deepcopy(preset)
-        st.success(f"`{name}` 프리셋을 저장했습니다.")
+        st.success(f"`{name}` 프리셋을 앱에 저장했습니다. (영구 보관은 '파일로 내보내기')")
     c2.download_button(
-        "JSON 내려받기",
+        "💾 파일로 내보내기",
         data=presets.to_bytes(preset),
         file_name=_safe_filename(name),
         mime="application/json",
         use_container_width=True,
         key=state.wkey("preset", "download", fid=fid),
+        help="프리셋을 내 컴퓨터에 파일(.json)로 영구 저장합니다. 나중에 아래 '프리셋 불러오기'로 "
+             "다시 올려 사용할 수 있습니다.",
     )
 
     st.divider()

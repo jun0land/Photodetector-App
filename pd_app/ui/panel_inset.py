@@ -151,7 +151,7 @@ def _sample_ui(ctx, cfg):
     cfg["text_raw"] = rich_input(
         "샘플 이름", cfg.get("text_raw") or "",
         key=state.wkey("inset", "sample.text_raw", fid=fid),
-        placeholder="Quasi-2D x3",
+        placeholder="Sample",
     )
     if not state.S().get("use_drag"):
         _position_ui(cfg, "sample", fid)

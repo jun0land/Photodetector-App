@@ -223,6 +223,10 @@ def parse_file(file_bytes, file_name):
         )
         range_map = {}
 
+    # 파일명 서식: (샘플명) [측정순서]. 소괄호/대괄호 밖 텍스트는 무시한다.
+    m_sample = re.search(r"\(([^)]*)\)", str(file_name))
+    sample = m_sample.group(1).strip() if m_sample else ""
+
     m = re.search(r"\[([^\]]+)\]", str(file_name))
     bracket = m.group(1).strip() if m else ""
     if not bracket:
@@ -257,4 +261,5 @@ def parse_file(file_bytes, file_name):
     # 💡 [핵심 추가] 파싱된 traces 데이터에 Dark 0V 영점 오프셋 자동 차감 보정 적용
     _apply_dark_zero_offset_correction(traces)
 
-    return {"traces": traces, "warnings": warns, "data_names": data_names}
+    return {"traces": traces, "warnings": warns, "data_names": data_names,
+            "sample": sample}

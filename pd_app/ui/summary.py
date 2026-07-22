@@ -251,10 +251,9 @@ def _stem(fid) -> str:
     return str(f.get("name", "graph")).rsplit(".", 1)[0] or "graph"
 
 
-def _report_csv(ctx, metric_rows) -> bytes:
+def _write_report(buf, ctx, metric_rows) -> None:
+    """한 파일의 리포트 본문을 buf 에 기록 (단일·일괄 내보내기 공용)."""
     m = _metrics_of(ctx.settings)
-    buf = io.StringIO()
-    buf.write("# Photodetector I-V Studio — report\n")
     buf.write(f"# file,{_stem(ctx.fid)}\n")
     buf.write(f"# V_op1 (V),{m.get('v_op1', -1.0)}\n")
     buf.write(f"# V_op2 (V),{m.get('v_op2', 1.0)}\n")
@@ -280,7 +279,143 @@ def _report_csv(ctx, metric_rows) -> bytes:
         for r in metric_rows
     ])
     mdf.to_csv(buf, index=False)
+
+
+def _report_csv(ctx, metric_rows) -> bytes:
+    buf = io.StringIO()
+    buf.write("# Photodetector I-V Studio — report\n")
+    _write_report(buf, ctx, metric_rows)
     return buf.getvalue().encode("utf-8-sig")
+
+
+def _bulk_report_csv(ctxs) -> bytes:
+    """열려 있는 모든 파일의 리포트를 하나의 CSV 로 이어붙인다."""
+    buf = io.StringIO()
+    buf.write(f"# Photodetector I-V Studio — bulk report ({len(ctxs)} files)\n")
+    for i, ctx in enumerate(ctxs):
+        buf.write("\n\n" if i else "\n")
+        rows, *_ = _compute_metrics(ctx)
+        _write_report(buf, ctx, rows)
+    return buf.getvalue().encode("utf-8-sig")
+
+
+# ---------------- 이미지 내보내기 공용 ----------------
+_BTN_STYLE = (
+    "width:100%; height:38px; margin:0; padding:0; "
+    "background-color:rgb(255, 255, 255); color:rgb(49, 51, 63); "
+    "border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; "
+    "cursor:pointer; font-size:14px; font-weight:400; "
+    "font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
+    "display:inline-flex; align-items:center; justify-content:center; "
+    "transition: border-color 0.15s ease, color 0.15s ease; box-sizing:border-box;"
+)
+_BTN_HOVER = "this.style.borderColor='#ed542b'; this.style.color='#ed542b';"
+_BTN_LEAVE = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
+
+
+def _fig_json(ctx, *, transparent: bool) -> str:
+    """ctx 파일의 그림을 내보내기용 JSON 문자열로. transparent=투명 PNG용, False=흰 배경 JPG용."""
+    if transparent:
+        stored = state.S()["files"][ctx.fid]["settings"]
+        png_settings = copy.deepcopy(ctx.settings)
+        ins = png_settings.get("insets", {})
+        if "legend" in ins:
+            ins["legend"]["bg_opacity"] = 0.0
+            ins["legend"]["border"] = False
+        if "sample" in ins:
+            ins["sample"]["bg_opacity"] = 0.0
+            ins["sample"]["border"] = False
+        state.S()["files"][ctx.fid]["settings"] = png_settings
+        try:
+            fig = figure.build_figure(ctx.fid, px_scale=1.0)
+            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+            return fig.to_json().replace("</script>", "<\\/script>")
+        finally:
+            state.S()["files"][ctx.fid]["settings"] = stored
+    fig = figure.build_figure(ctx.fid, px_scale=1.0)
+    fig.update_layout(paper_bgcolor="white", plot_bgcolor="white")
+    return fig.to_json().replace("</script>", "<\\/script>")
+
+
+def _bulk_image_html(items, fmt: str, btn_id: str, label: str) -> str:
+    """items=[(filename, fig_json), ...] 를 클릭 시 순차 다운로드하는 버튼 HTML."""
+    entries = ",\n".join(f"{{name: {json.dumps(name)}, fig: {fig}}}" for name, fig in items)
+    return f"""
+    <html>
+    <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
+    <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
+    <button id="{btn_id}" style="{_BTN_STYLE}"
+            onmouseover="{_BTN_HOVER}" onmouseout="{_BTN_LEAVE}">{label}</button>
+    <script>
+    var FIGS = [{entries}];
+    document.getElementById('{btn_id}').addEventListener('click', async function() {{
+        if (typeof Plotly === 'undefined') {{
+            alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
+            return;
+        }}
+        var btn = this; btn.disabled = true; var orig = btn.textContent;
+        for (var i = 0; i < FIGS.length; i++) {{
+            btn.textContent = '내보내는 중… (' + (i + 1) + '/' + FIGS.length + ')';
+            var item = FIGS[i];
+            var d = document.createElement('div');
+            d.style.position = 'absolute'; d.style.left = '-9999px';
+            d.style.width = '960px'; d.style.height = '768px';
+            document.body.appendChild(d);
+            await Plotly.newPlot(d, item.fig.data, item.fig.layout);
+            await Plotly.downloadImage(d, {{format: '{fmt}', width: 960, height: 768, scale: 3, filename: item.name}});
+            document.body.removeChild(d);
+            await new Promise(function(r) {{ setTimeout(r, 700); }});
+        }}
+        btn.textContent = orig; btn.disabled = false;
+    }});
+    </script>
+    </body>
+    </html>
+    """
+
+
+def render_bulk_export(ctxs) -> None:
+    """열려 있는 모든 파일 일괄 내보내기 — 성능지표 CSV 1개 + PNG/JPG 개별 다운로드 버튼."""
+    if len(ctxs) < 2:
+        st.caption("파일이 2개 이상일 때 일괄 내보내기를 사용할 수 있습니다.")
+        return
+    st.caption(
+        f"열려 있는 **{len(ctxs)}개 파일**을 한 번에 내보냅니다. 이미지는 파일마다 개별 저장되며, "
+        "브라우저가 여러 파일 다운로드 허용을 물으면 **허용**해 주세요."
+    )
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.download_button(
+            "📊 성능지표 일괄 CSV",
+            data=_bulk_report_csv(ctxs),
+            file_name="photodetector_bulk_report.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="pd_bulk_csv",
+        )
+
+    png_items, jpg_items = [], []
+    for ctx in ctxs:
+        stem = _stem(ctx.fid)
+        try:
+            png_items.append((stem, _fig_json(ctx, transparent=True)))
+            jpg_items.append((stem, _fig_json(ctx, transparent=False)))
+        except Exception:
+            continue
+
+    with c2:
+        st.components.v1.html(
+            _bulk_image_html(png_items, "png", "btn-bulk-png",
+                             f"🖼️ 일괄 PNG (투명) · {len(png_items)}개"),
+            height=46,
+        )
+    with c3:
+        st.components.v1.html(
+            _bulk_image_html(jpg_items, "jpeg", "btn-bulk-jpg",
+                             f"📷 일괄 JPG (흰 배경) · {len(jpg_items)}개"),
+            height=46,
+        )
 
 
 # ---------------- 내보내기 ----------------
