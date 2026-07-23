@@ -10,7 +10,6 @@ import re
 import streamlit as st
 
 from pd_app import constants, state
-from pd_app.ui.toolbar import rich_input
 
 _SAFE = re.compile(r"\W+")
 
@@ -153,8 +152,7 @@ def _range_i_by_tk(ctx) -> dict:
 
 def _render_row(ctx, tk, tr, ri_suffix=""):
     fid = ctx.fid
-    c_on, c_color, c_dash, c_text = st.columns(
-        [1.7, 0.5, 1.1, 1.2], vertical_alignment="center")
+    c_on, c_color, c_dash = st.columns(3, vertical_alignment="center")
 
     tr["visible"] = c_on.checkbox(
         tr["label"] + ri_suffix, value=bool(tr["visible"]),
@@ -172,12 +170,6 @@ def _render_row(ctx, tk, tr, ri_suffix=""):
         )
     ]
 
-    with c_text.popover("텍스트", use_container_width=True):
-        tr["legend_raw"] = rich_input(
-            "레전드 텍스트", tr.get("legend_raw", ""),
-            key=state.wkey("trace", f"{tk}.legend_raw", fid=fid)
-        )
-
 
 def render(ctx) -> None:
     traces = ctx.traces
@@ -185,7 +177,7 @@ def render(ctx) -> None:
         st.caption("표시할 트레이스가 없습니다.")
         return
 
-    h_on, h_color, h_dash, h_text = st.columns([1.7, 0.5, 1.1, 1.2])
+    h_on, h_color, h_dash = st.columns(3)
     h_on.caption(
         "표시",
         help="측정에 사용된 Range I(전류 레인지)가 트레이스마다 다를 경우에만, "
@@ -194,7 +186,6 @@ def render(ctx) -> None:
     )
     h_color.caption("색상")
     h_dash.caption("선 종류")
-    h_text.caption("텍스트")
 
     # Range I 가 서로 다를 때만 구분용으로 라벨에 표기 (인셋/레전드에는 영향 없음)
     ri_map = _range_i_by_tk(ctx)

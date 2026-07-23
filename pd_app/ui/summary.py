@@ -251,7 +251,7 @@ def _stem(fid) -> str:
     return str(f.get("name", "graph")).rsplit(".", 1)[0] or "graph"
 
 
-def _write_report(buf, ctx, metric_rows) -> None:
+def _write_report(buf, ctx, metric_rows, *, include_summary=True) -> None:
     """한 파일의 리포트 본문을 buf 에 기록 (단일·일괄 내보내기 공용)."""
     m = _metrics_of(ctx.settings)
     buf.write(f"# file,{_stem(ctx.fid)}\n")
@@ -260,8 +260,9 @@ def _write_report(buf, ctx, metric_rows) -> None:
     buf.write(f"# Area,{m['area']},{m['area_unit']}\n")
     buf.write(f"# Irradiance unit,{m.get('irr_unit', 'mW/cm2')}\n")
 
-    buf.write("\n# Data summary\n")
-    pd.DataFrame(_rows(ctx)).to_csv(buf, index=False)
+    if include_summary:
+        buf.write("\n# Data summary\n")
+        pd.DataFrame(_rows(ctx)).to_csv(buf, index=False)
 
     v1_str = f"{m.get('v_op1', -1.0):g}V"
     v2_str = f"{m.get('v_op2', 1.0):g}V"
@@ -295,7 +296,7 @@ def _bulk_report_csv(ctxs) -> bytes:
     for i, ctx in enumerate(ctxs):
         buf.write("\n\n" if i else "\n")
         rows, *_ = _compute_metrics(ctx)
-        _write_report(buf, ctx, rows)
+        _write_report(buf, ctx, rows, include_summary=False)
     return buf.getvalue().encode("utf-8-sig")
 
 
