@@ -50,6 +50,46 @@ _LOGO_URL = f"{_STATIC}/logo.png"
 _HAS_BG = (APP_DIR / "static" / "liquid_bg.jpg").exists()
 _HAS_LOGO = (APP_DIR / "static" / "logo.png").exists()
 
+# 번들 폰트: CDN(@import) 의존을 끊고 static/fonts/ 에서 직접 서빙한다. 오프라인·배포
+# 환경 어디서든 동일하게 렌더된다. Myriad Pro 는 OTF 원본, Pretendard 는 웹 최적 woff2.
+# 파일이 없으면 @font-face 를 생략 -> font stack 의 다음 폰트로 자연 폴백.
+_FONTS_URL = f"{_STATIC}/fonts"
+_FONTS_DIR = APP_DIR / "static" / "fonts"
+
+# Myriad Pro: 표준 너비(standard width)의 정체·이탤릭 5굵기. 너비 변형
+# (Cond/SemiCn/SemiExt)은 CSS 로 선택할 수단(font-stretch)이 없어 제외한다 —
+# 같은 'Myriad Pro' 이름에 함께 넣으면 일반 굵기 자리에 압축체가 물릴 수 있다.
+# (weight, style, 파일, local() 이름)
+_MYRIAD_FACES = [
+    (300, "normal", "MyriadPro-Light.otf",      "Myriad Pro Light"),
+    (400, "normal", "MyriadPro-Regular.otf",    "Myriad Pro"),
+    (600, "normal", "MyriadPro-Semibold.otf",   "Myriad Pro Semibold"),
+    (700, "normal", "MyriadPro-Bold.otf",       "Myriad Pro Bold"),
+    (900, "normal", "MyriadPro-Black.otf",      "Myriad Pro Black"),
+    (300, "italic", "MyriadPro-LightIt.otf",    "Myriad Pro Light Italic"),
+    (400, "italic", "MyriadPro-It.otf",         "Myriad Pro Italic"),
+    (600, "italic", "MyriadPro-SemiboldIt.otf", "Myriad Pro Semibold Italic"),
+    (700, "italic", "MyriadPro-BoldIt.otf",     "Myriad Pro Bold Italic"),
+    (900, "italic", "MyriadPro-BlackIt.otf",    "Myriad Pro Black Italic"),
+]
+_PRETENDARD_WEIGHTS = {400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold"}
+
+_font_faces: list[str] = []
+for _wght, _style, _file, _local in _MYRIAD_FACES:
+    if (_FONTS_DIR / _file).exists():
+        _font_faces.append(
+            f"@font-face{{font-family:'Myriad Pro';font-weight:{_wght};"
+            f"font-style:{_style};font-display:swap;"
+            f"src:local('{_local}'),url('{_FONTS_URL}/{_file}') format('opentype');}}"
+        )
+for _wght, _name in _PRETENDARD_WEIGHTS.items():
+    if (_FONTS_DIR / f"Pretendard-{_name}.woff2").exists():
+        _font_faces.append(
+            f"@font-face{{font-family:'Pretendard';font-weight:{_wght};font-display:swap;"
+            f"src:local('Pretendard {_name}'),url('{_FONTS_URL}/Pretendard-{_name}.woff2') format('woff2');}}"
+        )
+_FONT_FACES = "\n".join(_font_faces)
+
 _BG_LAYER = (
     f"linear-gradient(rgba(255,255,255,0.72), rgba(255,255,255,0.82)), url('{_BG_URL}')"
     if _HAS_BG else
@@ -67,7 +107,7 @@ def logo_url() -> str | None:
 # ===========================================================================
 _CSS = f"""
 <style>
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
+{_FONT_FACES}
 
 html, body, [class*="css"], .stApp, button, input, textarea, select {{
     font-family: 'Myriad Pro', 'Pretendard', 'Nanum Gothic', -apple-system, sans-serif !important;
