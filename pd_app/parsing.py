@@ -172,29 +172,26 @@ def _parse_settings(df):
     return result, order
 
 
-# 💡 [신규 추가] Dark 0V 영점 오프셋(I_offset) 보정 함수
-def _apply_dark_zero_offset_correction(traces: list[dict]) -> None:
-    """Dark Current의 0V 지점 오프셋(I_offset)을 추출하여 모든 트레이스(Dark + Photo)에서 일괄 차감합니다."""
-    i_offset = None
+def _dark_zero_offset(traces: list[dict]) -> float | None:
+    """Dark 의 0V 부근 전류값 = **표시용** 영점 오프셋. 데이터는 건드리지 않는다.
 
-    # 1. Dark 트레이스에서 V = 0V 에 가장 가까운 지점의 전류값(I_offset) 검색
+    암전류를 광전류용 Range I(예: 100uA)로 함께 측정하면 암전류가 그 레인지의 분해능
+    바닥에 깔려, 0V 에서 꺼지는 골짜기가 안 보이고 직선처럼 그려진다. 그래프에서만
+    이 값을 빼서 골짜기를 복원한다(figure.py).
+
+    성능지표(R·D*)는 이 보정 없이 **raw** 로 계산한다 — 고정 바이어스 I-T 측정에서
+    쓰는 정의(I_ph = I_light(V) - I_dark(V))와 방법을 일치시키기 위함.
+    """
     for t in traces:
         if t.get("label") == "Dark" and t.get("df") is not None and not t["df"].empty:
             df = t["df"]
             if "AnodeV" in df.columns and "AnodeI" in df.columns:
-                # 0V에 가장 가까운 행 검색
                 min_v_idx = (df["AnodeV"].abs()).idxmin()
-                # 0V와 가까운 지점(예: 0.05V 이내)인 경우 오프셋으로 인정
+                # 0V 와 가까운 지점(0.05V 이내)일 때만 오프셋으로 인정
                 if abs(df.loc[min_v_idx, "AnodeV"]) < 0.05:
-                    i_offset = float(df.loc[min_v_idx, "AnodeI"])
-                    break
-
-    # 2. Dark 0V 오프셋이 발견된 경우, 모든 트레이스(Dark & Photo)의 AnodeI 데이터에서 일괄 차감
-    if i_offset is not None and i_offset != 0.0:
-        for t in traces:
-            if t.get("df") is not None and not t["df"].empty:
-                if "AnodeI" in t["df"].columns:
-                    t["df"]["AnodeI"] = t["df"]["AnodeI"] - i_offset
+                    off = float(df.loc[min_v_idx, "AnodeI"])
+                    return off if off != 0.0 else None
+    return None
 
 
 @st.cache_data(show_spinner=False)
@@ -258,8 +255,6 @@ def parse_file(file_bytes, file_name):
         suffix = "" if seen[t["label"]] == 1 else f" #{seen[t['label']]}"
         t["legend"] = f"{t['label']} ({t['range_i']}){suffix}"
 
-    # 💡 [핵심 추가] 파싱된 traces 데이터에 Dark 0V 영점 오프셋 자동 차감 보정 적용
-    _apply_dark_zero_offset_correction(traces)
-
+    # df 는 raw 그대로 둔다. 0V 오프셋은 값만 실어 보내고 그래프에서만 뺀다.
     return {"traces": traces, "warnings": warns, "data_names": data_names,
-            "sample": sample}
+            "sample": sample, "i_offset": _dark_zero_offset(traces)}

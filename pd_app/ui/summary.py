@@ -88,13 +88,17 @@ def _current_at(df, v_op):
 
 
 def _dark_current_at(parsed, v_op):
+    """V_op 의 암전류를 **부호 그대로** 반환.
+
+    광전류는 부호 있는 차(I_light - I_dark)의 절댓값으로 구해야 두 전류의 부호가
+    갈리는 구간에서도 값이 맞는다. D* 분모에 쓸 때만 호출부에서 abs() 를 취한다.
+    """
     darks = [t["df"] for t in parsed["traces"]
              if t["label"] == "Dark" and t["df"] is not None and len(t["df"])]
     if not darks:
         return None
     cat = pd.concat(darks, ignore_index=True)
-    i_dark = _current_at(cat, v_op)
-    return None if i_dark is None else abs(i_dark)
+    return _current_at(cat, v_op)
 
 
 def _metrics_of(settings):
@@ -121,7 +125,7 @@ def _wavelength_labels(parsed):
 
 def _compute_metrics(ctx):
     """V_op1, V_op2 두 전압에서의 파장별 R, D* 동시 계산."""
-    rows, i_dark_abs1, i_dark_abs2 = [], None, None
+    rows, i_dark1, i_dark2 = [], None, None
     v_op1, v_op2, area_cm2 = -1.0, 1.0, 1.0
     try:
         m = _metrics_of(ctx.settings)
@@ -130,8 +134,8 @@ def _compute_metrics(ctx):
         area_cm2 = float(m["area"]) * (1e-2 if m["area_unit"] == "mm2" else 1.0)
         irr = m["irradiance"]
 
-        i_dark_abs1 = _dark_current_at(ctx.parsed, v_op1)
-        i_dark_abs2 = _dark_current_at(ctx.parsed, v_op2)
+        i_dark1 = _dark_current_at(ctx.parsed, v_op1)
+        i_dark2 = _dark_current_at(ctx.parsed, v_op2)
 
         df_by_label = {}
         for t in ctx.parsed["traces"]:
@@ -148,18 +152,20 @@ def _compute_metrics(ctx):
                 ee_w = float(ee) * 1e-3  # mW/cm² → W/cm²
 
                 # V_op1 계산 (-1V 기본)
-                if i_light1 is not None and i_dark_abs1 is not None:
-                    i_ph1 = abs(i_light1) - i_dark_abs1
+                if i_light1 is not None and i_dark1 is not None:
+                    # 광전류 = 같은 바이어스에서의 (광 - 암) 차. 절댓값의 차가 아니라
+                    # 차의 절댓값이어야 두 전류의 부호가 갈려도 크기가 맞는다. R 은 항상 양수.
+                    i_ph1 = abs(i_light1 - i_dark1)
                     R1 = i_ph1 / (ee_w * area_cm2)
-                    if i_dark_abs1 > 0:
-                        D1 = R1 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs1)
+                    if abs(i_dark1) > 0:
+                        D1 = R1 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * abs(i_dark1))
 
                 # V_op2 계산 (+1V 기본)
-                if i_light2 is not None and i_dark_abs2 is not None:
-                    i_ph2 = abs(i_light2) - i_dark_abs2
+                if i_light2 is not None and i_dark2 is not None:
+                    i_ph2 = abs(i_light2 - i_dark2)
                     R2 = i_ph2 / (ee_w * area_cm2)
-                    if i_dark_abs2 > 0:
-                        D2 = R2 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * i_dark_abs2)
+                    if abs(i_dark2) > 0:
+                        D2 = R2 * math.sqrt(area_cm2) / math.sqrt(2.0 * _Q_ELECTRON * abs(i_dark2))
 
             rows.append({
                 "파장": label,
@@ -169,7 +175,7 @@ def _compute_metrics(ctx):
             })
     except Exception:
         pass
-    return rows, i_dark_abs1, i_dark_abs2, v_op1, v_op2, area_cm2
+    return rows, i_dark1, i_dark2, v_op1, v_op2, area_cm2
 
 
 def _fmt(x) -> str:

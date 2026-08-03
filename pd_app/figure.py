@@ -73,9 +73,15 @@ def _visible_traces(parsed, settings):
     return out
 
 
-def _series(df, use_abs):
-    y = df["AnodeI"].abs() if use_abs else df["AnodeI"]
-    return df["AnodeV"], y
+def _series(df, use_abs, i_offset=0.0):
+    """표시용 시리즈. `i_offset` 은 Dark 의 0V 영점(parsing._dark_zero_offset).
+
+    광전류용 Range I 로 암전류를 함께 재면 암전류가 레인지 바닥에 깔려 0V 골짜기가
+    사라진다 → **그리기 직전에만** 빼서 복원한다. 성능지표는 raw 로 계산하므로
+    (summary.py) 이 보정은 지표에 영향을 주지 않는다.
+    """
+    i = df["AnodeI"] - i_offset if i_offset else df["AnodeI"]
+    return df["AnodeV"], (i.abs() if use_abs else i)
 
 
 def _minor(dtick, scale):
@@ -157,8 +163,9 @@ def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
     fig = go.Figure()
     zeros = 0
     xs, ys = [], []
+    i_offset = float(parsed.get("i_offset") or 0.0)
     for tk, ts, df in _visible_traces(parsed, settings):
-        x, y = _series(df, use_abs)
+        x, y = _series(df, use_abs, i_offset)
         if is_log:
             zeros += int((y <= 0).sum())
         xs.append(x)
