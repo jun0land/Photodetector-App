@@ -1,0 +1,14 @@
+# 가상환경 — 배포(Streamlit Cloud)는 requirements.txt 로 자체 설치한다.
+.venv/
+venv/
+myvenv/
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+*.swp
