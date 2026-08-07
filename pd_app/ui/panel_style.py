@@ -93,6 +93,31 @@ def _fonts(ctx):
         key=state.wkey("style", "show_markers", fid=fid),
     )
 
+    _dark_offset(ctx)
+
+
+def _dark_offset(ctx) -> None:
+    """Dark 0V 영점 보정 토글 — 표시 전용, 기본 꺼짐, 현재 파일에만 적용."""
+    st.markdown("---")
+    off = ctx.parsed.get("i_offset")
+    ctx.settings["dark_offset"] = st.checkbox(
+        "Dark 0V 영점 보정 (그래프 전용)",
+        value=bool(ctx.settings.get("dark_offset", False)),
+        disabled=off is None,
+        key=state.wkey("style", "dark_offset", fid=ctx.fid),
+        help="암전류를 광전류용 Range I 로 함께 측정하면 레인지 분해능 바닥에 깔려 "
+             "0V 골짜기가 안 보이고 직선처럼 그려집니다. 이 옵션을 켜면 Dark 의 0V "
+             "전류를 모든 트레이스에서 빼서 골짜기를 복원합니다. "
+             "**그래프 모양에만 영향을 주며 성능지표(R·D*)는 항상 raw 로 계산됩니다.** "
+             "현재 파일에만 적용됩니다.",
+    )
+    if off is None:
+        st.caption("Dark 트레이스에 0V 부근(±0.05V) 지점이 없어 보정할 수 없습니다.")
+    elif ctx.settings["dark_offset"]:
+        st.caption(f"적용 중 — 모든 트레이스에서 {off:+.3e} A 를 뺀 값으로 그립니다.")
+    else:
+        st.caption(f"현재 무보정(raw). 켜면 {off:+.3e} A 를 뺍니다.")
+
 
 def _geometry(ctx):
     """B1: Origin 방식 2단계. Background(inch) -> Graph(% of page)."""

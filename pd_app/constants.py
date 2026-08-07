@@ -129,6 +129,11 @@ DEFAULTS = {
                    "text_raw": "", "font_size": 30},
     },
     "use_abs": True,
+    # Dark 0V 영점 보정 — **그래프 표시 전용, 기본 꺼짐**.
+    # 암전류를 광전류용 Range I 로 함께 재면 레인지 분해능 바닥에 깔려 0V 골짜기가
+    # 안 보인다. 필요할 때만 [서식] 탭에서 켠다. 성능지표(R·D*)는 이 값과 무관하게
+    # 항상 raw 로 계산한다 (summary.py).
+    "dark_offset": False,
     # 성능 지표(Responsivity/Detectivity) 입력. **측정 조건이라 per-file** 이고
     # 프리셋에는 절대 들어가지 않는다 (presets.extract/apply 가 이 키를 다루지 않음).
     # irradiance 는 add_file 이 파일의 파장 라벨로 채운다 (Dark 제외, 빈 값 = None).

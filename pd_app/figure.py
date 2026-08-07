@@ -163,7 +163,8 @@ def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
     fig = go.Figure()
     zeros = 0
     xs, ys = [], []
-    i_offset = float(parsed.get("i_offset") or 0.0)
+    # 기본은 무보정. [서식] 탭에서 켰을 때만 Dark 0V 영점을 뺀다 (표시 전용).
+    i_offset = float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0
     for tk, ts, df in _visible_traces(parsed, settings):
         x, y = _series(df, use_abs, i_offset)
         if is_log:
