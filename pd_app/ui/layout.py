@@ -260,6 +260,8 @@ def _graph_stage(ctx, s: float) -> None:
 
 def render_app() -> None:
     theme.install()
+    # 올린 파일이 있을 때만 이탈 경고 (빈 화면에서 묻는 건 성가시다).
+    theme.unload_guard(bool(state.S()["order"]))
 
     _header()
     fid = _banner()

@@ -609,6 +609,40 @@ _BIND_JS = r"""
 """
 
 
+# 창 닫기·새로고침 이탈 경고. 세션 상태(업로드 파일·서식·프리셋)는 새로고침하면
+# 사라지므로 실수로 날리는 걸 막는다.
+#
+# - 리스너는 **한 번만** 붙이고, 켜고 끄기는 window.__pdGuard 플래그로 한다.
+#   매 rerun 마다 addEventListener 를 다시 부르면 핸들러가 쌓인다.
+# - Streamlit 의 rerun 은 websocket 통신이라 페이지 unload 가 아니다 → 안 걸린다.
+# - 경고 문구는 브라우저가 자체 문구로 대체한다(사양). 커스텀 메시지 지정 불가.
+_UNLOAD_GUARD_JS = """
+<script>
+(function () {
+  window.__pdGuard = %s;
+  if (!window.__pdGuardBound) {
+    window.__pdGuardBound = true;
+    window.addEventListener('beforeunload', function (e) {
+      if (!window.__pdGuard) return;
+      e.preventDefault();
+      e.returnValue = '';   // 크롬/사파리 호환용
+      return '';
+    });
+  }
+})();
+</script>
+"""
+
+
+def unload_guard(enabled: bool) -> None:
+    """창 닫기·새로고침 시 확인창을 띄운다. 올린 파일이 없으면 끈다.
+
+    매 run 호출해도 안전하다 (리스너는 최초 1회만 등록, 이후엔 플래그만 갱신).
+    """
+    st.html(_UNLOAD_GUARD_JS % ("true" if enabled else "false"),
+            unsafe_allow_javascript=True)
+
+
 def fig_metrics(w_px: int, h_px: int) -> None:
     """figure 의 **고유** 픽셀 크기를 CSS 변수로 알린다. 매 run 호출 (layout 이 호출).
 
