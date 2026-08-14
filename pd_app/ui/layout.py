@@ -260,10 +260,14 @@ def _graph_stage(ctx, s: float) -> None:
 
 def render_app() -> None:
     theme.install()
-    # 올린 파일이 있을 때만 이탈 경고 (빈 화면에서 묻는 건 성가시다).
-    theme.unload_guard(bool(state.S()["order"]))
 
     _header()
+    # ⚠️ 반드시 _header() **뒤**. 업로드를 세션에 반영하는 _ingest() 가 _header() 안에
+    # 있어서, 앞에 두면 파일을 올린 그 run 에서는 order 가 아직 비어 있어 항상 꺼진
+    # 상태로 찍힌다 (그 뒤 자동 rerun 이 없어 계속 꺼진 채 남는다).
+    # _empty_state() 의 st.stop() 보다는 앞이라 파일을 다 지운 경우도 꺼짐이 반영된다.
+    theme.unload_guard(bool(state.S()["order"]))
+
     fid = _banner()
     if fid is None:
         _empty_state()
