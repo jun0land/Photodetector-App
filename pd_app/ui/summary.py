@@ -257,6 +257,48 @@ def _stem(fid) -> str:
     return str(f.get("name", "graph")).rsplit(".", 1)[0] or "graph"
 
 
+# 파장 정렬 기준. SYMBOL_MAP 은 d,8,7,6,5,4,3,2,1 순(= 940→365 내림차순)이라
+# 그 값 순서가 곧 데이터셋 시트의 열 순서다. 측정 순서(파일명 대괄호)가 달라도
+# 붙여넣기 블록의 열 순서는 항상 이 기준을 따라야 열이 어긋나지 않는다.
+_WL_ORDER = [v for v in constants.SYMBOL_MAP.values() if v != "Dark"]
+
+
+def _sorted_wavelengths(labels) -> list:
+    rank = {w: i for i, w in enumerate(_WL_ORDER)}
+    return sorted(labels, key=lambda lb: (rank.get(lb, 999), str(lb)))
+
+
+def _write_paste_block(buf, metric_rows, v1_lab: str, v2_lab: str) -> None:
+    """데이터셋 시트에 바로 붙여넣을 수 있는 가로 배치 블록 (Responsivity 만).
+
+    A: 파장 = 열, 바이어스 = 행 (2행)  — 각 행을 따로 붙여넣을 때
+    B: 한 행에 12개 값                  — Data 시트 D~O 열에 한 번에 붙여넣을 때
+    """
+    by = {r["파장"]: r for r in metric_rows}
+    labels = _sorted_wavelengths(by.keys())
+    if not labels:
+        return
+
+    def cell(lb, key):
+        v = by[lb].get(key)
+        return "" if v is None else f"{v:.6e}"
+
+    buf.write("\n# Paste-ready A — Responsivity (A/W) · 파장=열, 바이어스=행\n")
+    buf.write("," + ",".join(labels) + "\n")
+    for lab, key in ((v1_lab, "R_v1"), (v2_lab, "R_v2")):
+        buf.write(f"R({lab})," + ",".join(cell(lb, key) for lb in labels) + "\n")
+
+    # 데이터셋 시트(Data)의 R 열은 R(-1 V)_940 … R(+1 V)_470 순의 한 행이다.
+    heads, vals = [], []
+    for lab, key in ((v1_lab, "R_v1"), (v2_lab, "R_v2")):
+        for lb in labels:
+            heads.append(f"R({lab})_{str(lb).split()[0]}")
+            vals.append(cell(lb, key))
+    buf.write("\n# Paste-ready B — 위 열 순서 그대로 한 행 (Data 시트 R 열 구간에 한 번에)\n")
+    buf.write(",".join(heads) + "\n")
+    buf.write(",".join(vals) + "\n")
+
+
 def _write_report(buf, ctx, metric_rows, *, include_summary=True) -> None:
     """한 파일의 리포트 본문을 buf 에 기록 (단일·일괄 내보내기 공용)."""
     m = _metrics_of(ctx.settings)
@@ -286,6 +328,11 @@ def _write_report(buf, ctx, metric_rows, *, include_summary=True) -> None:
         for r in metric_rows
     ])
     mdf.to_csv(buf, index=False)
+
+    # 데이터셋 시트 붙여넣기용 가로 배치. 바이어스 라벨은 목표 시트 헤더와 같은
+    # 표기를 쓴다 — 양수에도 부호를 붙여야 R(+1 V)_940 과 정확히 일치한다.
+    _write_paste_block(buf, metric_rows,
+                       f"{m.get('v_op1', -1.0):+g} V", f"{m.get('v_op2', 1.0):+g} V")
 
 
 def _report_csv(ctx, metric_rows) -> bytes:
