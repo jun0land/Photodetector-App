@@ -466,140 +466,205 @@ def render_bulk_export(ctxs) -> None:
 
 
 # ---------------- 내보내기 ----------------
-def _export(ctx, metric_rows) -> None:
-    st.download_button(
-        "📊 요약 · 지표 CSV 다운로드",
-        data=_report_csv(ctx, metric_rows),
-        file_name=f"{_stem(ctx.fid)}_report.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-
-    st.markdown("<br><b>이미지 내보내기 (출판용 고화질 300dpi)</b>", unsafe_allow_html=True)
-    
-    try:
-        # 1. 완전 투명 PNG용 데이터 조립
-        png_settings = copy.deepcopy(ctx.settings)
-        if "insets" in png_settings:
-            if "legend" in png_settings["insets"]:
-                png_settings["insets"]["legend"]["bg_opacity"] = 0.0
-                png_settings["insets"]["legend"]["border"] = False
-            if "sample" in png_settings["insets"]:
-                png_settings["insets"]["sample"]["bg_opacity"] = 0.0
-                png_settings["insets"]["sample"]["border"] = False
-                
-        original_settings = copy.deepcopy(ctx.settings)
-        state.S()["files"][ctx.fid]["settings"] = png_settings
-        
-        export_fig_png = figure.build_figure(ctx.fid, px_scale=1.0)
-        export_fig_png.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
-        export_json_png = export_fig_png.to_json().replace("</script>", "<\\/script>")
-
-        # 2. 불투명 흰색 JPG용 데이터 조립
-        state.S()["files"][ctx.fid]["settings"] = original_settings
-        
-        export_fig_jpg = figure.build_figure(ctx.fid, px_scale=1.0)
-        export_fig_jpg.update_layout(paper_bgcolor="white", plot_bgcolor="white")
-        export_json_jpg = export_fig_jpg.to_json().replace("</script>", "<\\/script>")
-        
-    except Exception as e:
-        st.error("내보내기 데이터 준비 중 오류가 발생했습니다.")
-        state.S()["files"][ctx.fid]["settings"] = original_settings
-        return
-
-    c_png, c_jpg = st.columns(2)
-    stem_name = _stem(ctx.fid)
-    accent_color = "#ed542b"
-
-    btn_style = (
-        "width:100%; height:38px; margin:0; padding:0; "
-        "background-color:rgb(255, 255, 255); color:rgb(49, 51, 63); "
-        "border:1px solid rgba(49, 51, 63, 0.2); border-radius:0.5rem; "
-        "cursor:pointer; font-size:14px; font-weight:400; "
-        "font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; "
-        "display:inline-flex; align-items:center; justify-content:center; "
-        "transition: border-color 0.15s ease, color 0.15s ease; box-sizing:border-box;"
-    )
-    
-    on_hover = f"this.style.borderColor='{accent_color}'; this.style.color='{accent_color}';"
-    on_leave = "this.style.borderColor='rgba(49, 51, 63, 0.2)'; this.style.color='rgb(49, 51, 63)';"
-
-    with c_png:
-        png_html = f"""
-        <html>
-        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
-        <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
-        <button id="btn-png" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
-        🖼️ PNG (완전 투명) 다운로드
-        </button>
-        <script>
-        document.getElementById('btn-png').addEventListener('click', function() {{
-            if (typeof Plotly === 'undefined') {{
-                alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
-                return;
-            }}
-            var tempDiv = document.createElement('div');
-            tempDiv.style.position = 'absolute';
-            tempDiv.style.left = '-9999px';
-            tempDiv.style.width = '960px';
-            tempDiv.style.height = '768px';
-            document.body.appendChild(tempDiv);
-            
-            var figData = {export_json_png};
-            
-            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                Plotly.downloadImage(tempDiv, {{format: 'png', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                    document.body.removeChild(tempDiv);
-                }});
+def _image_button_html(fig_json: str, fmt: str, btn_id: str, label: str, stem: str) -> str:
+    """단일 파일 이미지 다운로드 버튼 HTML (일괄용 _bulk_image_html 과 같은 스타일)."""
+    return f"""
+    <html>
+    <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
+    <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
+    <button id="{btn_id}" style="{_BTN_STYLE}"
+            onmouseover="{_BTN_HOVER}" onmouseout="{_BTN_LEAVE}">{label}</button>
+    <script>
+    document.getElementById('{btn_id}').addEventListener('click', function() {{
+        if (typeof Plotly === 'undefined') {{
+            alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
+            return;
+        }}
+        var d = document.createElement('div');
+        d.style.position = 'absolute'; d.style.left = '-9999px';
+        d.style.width = '960px'; d.style.height = '768px';
+        document.body.appendChild(d);
+        var fig = {fig_json};
+        Plotly.newPlot(d, fig.data, fig.layout).then(function() {{
+            Plotly.downloadImage(d, {{format: '{fmt}', width: 960, height: 768, scale: 3,
+                                      filename: {json.dumps(stem)}}}).then(function() {{
+                document.body.removeChild(d);
             }});
         }});
-        </script>
-        </body>
-        </html>
-        """
-        st.components.v1.html(png_html, height=40)
+    }});
+    </script>
+    </body>
+    </html>
+    """
 
-    with c_jpg:
-        jpg_html = f"""
-        <html>
-        <head><script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script></head>
-        <body style="margin:0; padding:0; background:transparent; overflow:hidden;">
-        <button id="btn-jpg" style="{btn_style}" onmouseover="{on_hover}" onmouseout="{on_leave}">
-        📷 JPG (흰색 배경) 다운로드
-        </button>
-        <script>
-        document.getElementById('btn-jpg').addEventListener('click', function() {{
-            if (typeof Plotly === 'undefined') {{
-                alert('이미지 생성 엔진 로딩 중입니다. 1~2초 뒤 다시 클릭해주세요.');
-                return;
-            }}
-            var tempDiv = document.createElement('div');
-            tempDiv.style.position = 'absolute';
-            tempDiv.style.left = '-9999px';
-            tempDiv.style.width = '960px';
-            tempDiv.style.height = '768px';
-            document.body.appendChild(tempDiv);
-            
-            var figData = {export_json_jpg};
-            
-            Plotly.newPlot(tempDiv, figData.data, figData.layout).then(function() {{
-                Plotly.downloadImage(tempDiv, {{format: 'jpeg', width: 960, height: 768, scale: 3, filename: '{stem_name}'}}).then(function() {{
-                    document.body.removeChild(tempDiv);
-                }});
-            }});
-        }});
-        </script>
-        </body>
-        </html>
-        """
-        st.components.v1.html(jpg_html, height=40)
 
-    w_in = float(ctx.settings["geom"]["page_w_in"])
-    h_in = float(ctx.settings["geom"]["page_h_in"])
-    st.caption(
-        f"※ **출력 해상도 정보**: 화면 미리보기 배율과 무관하게, 연구실 설정에 명시된 "
-        f"네이티브 **{w_in:g}×{h_in:g} 인치** 크기를 정확히 유지한 채 **3배 고화질 스케일(300 dpi 상당)**로 영구 추출됩니다."
-    )
+# ---------------- 엑셀 내보내기 (Origin 편집용) ----------------
+def _export_traces(ctx) -> list[dict]:
+    """내보낼 트레이스 목록. Dark 먼저, 그 다음 파장 내림차순(940→365). 같은 라벨은
+    측정 순서대로 #2, #3 … 을 붙인다. 각 항목: name, label, df, visible, range_i.
+    """
+    rank = {w: i for i, w in enumerate(_WL_ORDER)}
+    seen: dict[str, int] = {}
+    items = []
+    for idx, t in enumerate(ctx.parsed["traces"]):
+        lb = t["label"]
+        seen[lb] = seen.get(lb, 0) + 1
+        occ = seen[lb]
+        ts = ctx.traces.get(state.tkey_of(t, occ)) or {}
+        items.append({
+            "name": lb if occ == 1 else f"{lb} #{occ}",
+            "label": lb,
+            "df": t["df"],
+            "visible": bool(ts.get("visible", True)),
+            "range_i": t.get("range_i", ""),
+            "_key": (-1 if lb == "Dark" else rank.get(lb, 999), idx),
+        })
+    items.sort(key=lambda it: it["_key"])
+    return items
+
+
+def _write_xy_sheet(ws, items, *, transform=None) -> None:
+    """트레이스별 (V, I) 열 쌍을 나란히 쓴다 — Origin 이 X/Y 로 바로 지정할 수 있는 배치.
+
+    1행 = Long Name, 2행 = Units (Origin 의 헤더 관례). 3행부터 데이터.
+    트레이스마다 점 개수가 달라도 각자 열이므로 문제 없다.
+    """
+    from openpyxl.styles import Font, Alignment
+    from openpyxl.utils import get_column_letter
+
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center")
+    col = 1
+    for it in items:
+        df = it["df"]
+        v = df["AnodeV"].to_numpy(dtype=float)
+        i = df["AnodeI"].to_numpy(dtype=float)
+        if transform is not None:
+            v, i = transform(df)
+            v = np.asarray(v, dtype=float); i = np.asarray(i, dtype=float)
+
+        for j, (title, unit, arr) in enumerate(((f"{it['name']} V", "V", v),
+                                                (f"{it['name']} I", "A", i))):
+            c = ws.cell(row=1, column=col + j, value=title); c.font = bold; c.alignment = center
+            c = ws.cell(row=2, column=col + j, value=unit); c.alignment = center
+            for r, val in enumerate(arr, start=3):
+                ws.cell(row=r, column=col + j,
+                        value=(None if not np.isfinite(val) else float(val)))
+            ws.column_dimensions[get_column_letter(col + j)].width = 16
+        col += 2
+    ws.freeze_panes = "A3"
+
+
+def _excel_bytes(ctx, metric_rows) -> bytes:
+    """Origin 에서 바로 열어 편집할 수 있는 .xlsx.
+
+    Plot    그래프에 그려진 값 그대로 (숨긴 트레이스 제외, 로그축이면 |I|, 보정 켜졌으면 차감)
+    Raw     원본 AnodeV / AnodeI 전 트레이스 (부호·오프셋 무보정)
+    Metrics 성능지표 표 + 데이터셋 붙여넣기 블록
+    Info    파일·샘플·측정 조건·Range I
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    settings = ctx.settings
+    parsed = ctx.parsed
+    m = _metrics_of(settings)
+    items = _export_traces(ctx)
+
+    # 그래프와 동일한 변환 (figure.build_figure 의 규칙을 그대로 따른다)
+    is_log = settings["axes"]["y"].get("type", "log") == "log"
+    use_abs = True if is_log else bool(settings.get("use_abs", False))
+    i_off = float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0
+
+    def plot_xf(df):
+        return figure._series(df, use_abs, i_off)
+
+    wb = Workbook()
+
+    ws = wb.active; ws.title = "Plot"
+    _write_xy_sheet(ws, [it for it in items if it["visible"]], transform=plot_xf)
+
+    ws = wb.create_sheet("Raw")
+    _write_xy_sheet(ws, items)
+
+    # --- Metrics ---
+    ws = wb.create_sheet("Metrics")
+    bold = Font(bold=True)
+    v1_lab = f"{m.get('v_op1', -1.0):+g} V"
+    v2_lab = f"{m.get('v_op2', 1.0):+g} V"
+    heads = ["Wavelength", "E_e (mW/cm2)",
+             f"R({v1_lab}) (A/W)", f"D*({v1_lab}) (Jones)",
+             f"R({v2_lab}) (A/W)", f"D*({v2_lab}) (Jones)"]
+    for j, h in enumerate(heads, start=1):
+        ws.cell(row=1, column=j, value=h).font = bold
+    for r, row in enumerate(metric_rows, start=2):
+        ws.cell(row=r, column=1, value=row["파장"])
+        ws.cell(row=r, column=2, value=row["E_e"])
+        for j, k in enumerate(("R_v1", "D_v1", "R_v2", "D_v2"), start=3):
+            ws.cell(row=r, column=j, value=row[k])
+
+    # 붙여넣기 블록 (CSV 의 Paste-ready 와 동일)
+    by = {r["파장"]: r for r in metric_rows}
+    labels = _sorted_wavelengths(by.keys())
+    r0 = len(metric_rows) + 4
+    ws.cell(row=r0, column=1, value="Paste-ready A — 파장=열, 바이어스=행").font = bold
+    for j, lb in enumerate(labels, start=2):
+        ws.cell(row=r0 + 1, column=j, value=lb).font = bold
+    for k, (lab, key) in enumerate(((v1_lab, "R_v1"), (v2_lab, "R_v2"))):
+        ws.cell(row=r0 + 2 + k, column=1, value=f"R({lab})").font = bold
+        for j, lb in enumerate(labels, start=2):
+            ws.cell(row=r0 + 2 + k, column=j, value=by[lb].get(key))
+    r1 = r0 + 6
+    ws.cell(row=r1, column=1, value="Paste-ready B — 한 행 (Data 시트 R 열 구간)").font = bold
+    j = 1
+    for lab, key in ((v1_lab, "R_v1"), (v2_lab, "R_v2")):
+        for lb in labels:
+            ws.cell(row=r1 + 1, column=j, value=f"R({lab})_{str(lb).split()[0]}").font = bold
+            ws.cell(row=r1 + 2, column=j, value=by[lb].get(key))
+            j += 1
+    for c in range(1, 14):
+        ws.column_dimensions[ws.cell(row=1, column=c).column_letter].width = 18
+
+    # --- Info ---
+    ws = wb.create_sheet("Info")
+    f = state.S()["files"].get(ctx.fid) or {}
+    info = [
+        ("File", f.get("name", "")),
+        ("Sample", settings["insets"]["sample"].get("text_raw", "")),
+        ("V_op1 (V)", m.get("v_op1", -1.0)),
+        ("V_op2 (V)", m.get("v_op2", 1.0)),
+        ("Area", m["area"]),
+        ("Area unit", m["area_unit"]),
+        ("Irradiance unit", m.get("irr_unit", "mW/cm2")),
+        ("Y axis", "log |I|" if is_log else "linear"),
+        ("Dark 0V offset applied to Plot", bool(settings.get("dark_offset"))),
+        ("Dark 0V offset value (A)", parsed.get("i_offset")),
+    ]
+    for r, (k, v) in enumerate(info, start=1):
+        ws.cell(row=r, column=1, value=k).font = bold
+        ws.cell(row=r, column=2, value=v)
+    r = len(info) + 2
+    ws.cell(row=r, column=1, value="E_e per wavelength (mW/cm2)").font = bold
+    for lb in _sorted_wavelengths(m["irradiance"].keys()):
+        r += 1
+        ws.cell(row=r, column=1, value=lb); ws.cell(row=r, column=2, value=m["irradiance"][lb])
+    r += 2
+    ws.cell(row=r, column=1, value="Trace").font = bold
+    ws.cell(row=r, column=2, value="Range I").font = bold
+    ws.cell(row=r, column=3, value="Points").font = bold
+    ws.cell(row=r, column=4, value="Visible").font = bold
+    for it in items:
+        r += 1
+        ws.cell(row=r, column=1, value=it["name"])
+        ws.cell(row=r, column=2, value=it["range_i"])
+        ws.cell(row=r, column=3, value=int(len(it["df"])))
+        ws.cell(row=r, column=4, value=it["visible"])
+    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["B"].width = 22
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 # ---------------- 진입점 ----------------
@@ -609,7 +674,62 @@ def render(ctx) -> None:
 
 
 def render_metrics(ctx) -> None:
+    """[성능 지표] 익스팬더 — 입력 + 표. 내보내기 버튼은 좌측 [내보내기] 탭으로 옮겼다."""
     _metrics_inputs(ctx)
     st.markdown("---")
-    metric_rows = _metrics_table(ctx)
-    _export(ctx, metric_rows)
+    _metrics_table(ctx)
+
+
+def render_export(ctx) -> None:
+    """좌측 편집 패널 [내보내기] 탭 — 현재 파일 하나의 개별 내보내기.
+
+    ⚠️ 반드시 render_metrics(성능 지표 위젯) **뒤**에 호출할 것. 이 함수는
+    settings["metrics"] 를 읽는데, 위젯이 값을 써넣는 건 render_metrics 안이다.
+    앞에 두면 V_op·면적·E_e 를 바꾼 첫 run 에서 한 run 늦은 값으로 파일이 만들어진다.
+    """
+    stem = _stem(ctx.fid)
+    rows, *_ = _compute_metrics(ctx)
+
+    st.caption("현재 파일 하나를 내보냅니다. 여러 파일 한 번에는 우측 일괄 내보내기.")
+
+    st.markdown("**데이터**")
+    try:
+        xlsx = _excel_bytes(ctx, rows)
+    except Exception as e:  # noqa: BLE001
+        xlsx = None
+        st.error(f"엑셀 생성 실패: {type(e).__name__}: {e}")
+    st.download_button(
+        "📗 엑셀 (.xlsx) — Origin 편집용",
+        data=xlsx or b"",
+        file_name=f"{stem}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        disabled=xlsx is None,
+        key=state.wkey("export", "xlsx", fid=ctx.fid),
+        help="Plot(그래프 값) · Raw(원본) · Metrics(지표+붙여넣기 블록) · Info 시트. "
+             "트레이스마다 V/I 열 쌍이라 Origin 에서 X/Y 로 바로 지정할 수 있습니다.",
+    )
+    st.download_button(
+        "📊 요약 · 지표 CSV",
+        data=_report_csv(ctx, rows),
+        file_name=f"{stem}_report.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=state.wkey("export", "csv", fid=ctx.fid),
+    )
+
+    st.markdown("**이미지 (10×8 in · 300 dpi 상당)**")
+    try:
+        png_json = _fig_json(ctx, transparent=True)
+        jpg_json = _fig_json(ctx, transparent=False)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"이미지 준비 실패: {type(e).__name__}")
+        return
+    st.components.v1.html(
+        _image_button_html(png_json, "png", "btn-png", "🖼️ PNG (투명 배경)", stem), height=44)
+    st.components.v1.html(
+        _image_button_html(jpg_json, "jpeg", "btn-jpg", "📷 JPG (흰 배경)", stem), height=44)
+
+    w_in = float(ctx.settings["geom"]["page_w_in"])
+    h_in = float(ctx.settings["geom"]["page_h_in"])
+    st.caption(f"화면 배율과 무관하게 {w_in:g}×{h_in:g} in 를 3배 스케일로 추출합니다.")

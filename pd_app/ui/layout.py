@@ -55,7 +55,11 @@ def show_manual() -> None:
     * **글자 색상**: `{#원하는Hex색상|텍스트}` (예: `{#FF0000|적색}`)
 
     ### 4. 데이터 내보내기
-    * **개별 파일**: 우측 하단 **[성능 지표 · 내보내기]** 패널에서 출판용 고해상도(10×8인치) PNG·JPG 및 요약 CSV를 저장합니다.
+    * **개별 파일**: 좌측 편집 패널의 **[내보내기]** 탭에서 저장합니다.
+      * **엑셀 (.xlsx)** — Origin 에서 바로 열어 편집할 수 있는 형식. `Plot`(그래프에 그려진 값)·`Raw`(원본)·`Metrics`(성능지표+붙여넣기 블록)·`Info` 시트로 구성되며, 트레이스마다 V/I 열 쌍이라 Origin 에서 X/Y 지정이 바로 됩니다.
+      * **CSV** — 요약·지표 리포트.
+      * **PNG·JPG** — 출판용 고해상도(10×8인치, 300 dpi 상당).
+    * 성능지표 입력(동작전압·면적·조도)은 그래프 아래 **[성능 지표]** 패널에서 합니다.
     * **여러 파일 한 번에**: 파일을 2개 이상 올리면 상단에 **[🗂 전체 파일 일괄 내보내기]** 패널이 나타납니다. 성능지표 CSV(전체 통합 1개)·일괄 PNG·일괄 JPG를 받을 수 있습니다. 이미지는 **파일마다 개별 저장**되며, 브라우저가 다중 다운로드 허용을 물으면 **허용**하세요.
 
     ### 5. 프리셋(그래프 서식) 저장 — '앱에 저장' vs '파일로 내보내기'
@@ -195,10 +199,17 @@ def _build_ctx(fid) -> SimpleNamespace:
     )
 
 
-def _edit_panel(ctx) -> None:
+def _edit_panel(ctx):
+    """좌측 편집 패널. [내보내기] 탭 컨테이너는 **비워서 반환**한다.
+
+    내보내기는 성능 지표 위젯(V_op·면적·E_e)이 써넣은 값을 읽어야 하는데 그 위젯은
+    그래프 스테이지의 익스팬더 안에 있다. 좌측 컬럼이 먼저 그려지므로 여기서 바로
+    채우면 값을 바꾼 첫 run 에 한 run 늦은 파일이 만들어진다. 호출자가 그래프
+    스테이지를 그린 뒤 `with tab:` 으로 채운다 (Streamlit 컨테이너는 나중에 써도 된다).
+    """
     with st.container(key="pd_edit_panel"):
-        t_tr, t_ax, t_st, t_in, t_fmt = st.tabs(
-            ["트레이스", "축", "서식", "인셋", "포맷"]
+        t_tr, t_ax, t_st, t_in, t_fmt, t_exp = st.tabs(
+            ["트레이스", "축", "서식", "인셋", "포맷", "내보내기"]
         )
         with t_tr:
             panel_traces.render(ctx)
@@ -210,6 +221,7 @@ def _edit_panel(ctx) -> None:
             panel_inset.render(ctx)
         with t_fmt:
             panel_presets.render(ctx)
+    return t_exp
 
 
 def _display_scale() -> float:
@@ -252,7 +264,7 @@ def _graph_stage(ctx, s: float) -> None:
     if zeros > 0:
         st.caption(f"로그 스케일이라 0 이하인 점 {zeros}개는 표시에서 제외되었습니다.")
 
-    with st.expander("성능 지표 · 내보내기", expanded=False):
+    with st.expander("성능 지표", expanded=False):
         summary.render_metrics(ctx)
     with st.expander("데이터 요약", expanded=False):
         summary.render(ctx)
@@ -279,7 +291,7 @@ def render_app() -> None:
         col_l, col_mid, col_r = st.columns([5.0, 11.0, 2.3], gap="medium", vertical_alignment="top")
 
         with col_l:
-            _edit_panel(ctx)
+            t_exp = _edit_panel(ctx)
         with col_r:
             s_val = _display_scale()
             if len(state.S()["order"]) >= 2:
@@ -287,3 +299,6 @@ def render_app() -> None:
                 summary.render_bulk_export([_build_ctx(f) for f in state.S()["order"]])
         with col_mid:
             _graph_stage(ctx, s_val)
+        # 성능 지표 위젯이 값을 써넣은 **뒤**에 개별 내보내기를 채운다 (_edit_panel 주석 참조).
+        with t_exp:
+            summary.render_export(ctx)
