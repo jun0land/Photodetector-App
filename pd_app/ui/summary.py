@@ -18,6 +18,10 @@ from pd_app import constants, figure, postproc, state
 
 _Q_ELECTRON = 1.602e-19  # C
 
+# 내보낸 엑셀의 Info 시트에 기계가 읽을 설정을 담는 행 이름.
+# parsing._parse_exported() 가 같은 이름을 찾는다 — 바꾸면 양쪽을 같이 바꿀 것.
+_SETTINGS_KEY = "Settings (JSON) — 다시 불러오기용"
+
 
 # ---------------- 데이터 요약 ----------------
 def _range_i_warning(parsed) -> None:
@@ -703,6 +707,19 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
         ("Metrics computed from", "Raw (후처리·오프셋 미적용)"),
         # X 를 공유시키면 그룹 대표 X 를 쓰므로, 스윕 간 실측 전압 차이가 있었다면 남긴다.
         ("Shared-X max deviation", x_dev or "0 (완전 일치)"),
+        # 위 'Post-processing' 은 사람이 읽는 요약이라 되돌려 읽을 수 없다. 이 파일을
+        # 앱에 다시 올렸을 때 보정 설정을 그대로 복원하려고 기계가 읽을 형태로 한 번 더 적는다.
+        (_SETTINGS_KEY, json.dumps({
+            "dark_offset": bool(settings.get("dark_offset")),
+            "export_abs": exp_abs,
+            "postproc": postproc.cfg(settings),
+            "use_abs": bool(settings.get("use_abs", True)),
+            "metrics": {"v_op1": m.get("v_op1", -1.0), "v_op2": m.get("v_op2", 1.0),
+                        "area": m["area"], "area_unit": m["area_unit"],
+                        "irradiance": dict(m["irradiance"])},
+            "visible": {it["name"]: it["visible"] for it in items},
+            "range_i": {it["name"]: it["range_i"] for it in items},
+        }, ensure_ascii=False)),
     ]
     for r, (k, v) in enumerate(info, start=1):
         ws.cell(row=r, column=1, value=k).font = bold

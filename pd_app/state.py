@@ -58,6 +58,52 @@ def tkey_of(trace, occurrence):
     return f"{trace['label']}#{occurrence}"
 
 
+def _restore_settings(settings, restored) -> None:
+    """내보낸 엑셀의 Info 시트에 적힌 설정을 새 파일 settings 에 되살린다.
+
+    `restored` 가 None(= Keithley 원본)이면 아무것도 하지 않는다. 값은 전부 검증 없이
+    믿지 않고 아는 키만 골라 덮어쓴다 — 오래된/손상된 파일이 앱을 깨뜨리지 않게.
+    트레이스 표시 여부는 '라벨 #순번' 이름으로 되돌린다 (내보낼 때 쓴 이름과 같다).
+    """
+    if not isinstance(restored, dict):
+        return
+
+    for key in ("dark_offset", "export_abs", "use_abs"):
+        if isinstance(restored.get(key), bool):
+            settings[key] = restored[key]
+
+    pp = restored.get("postproc")
+    if isinstance(pp, dict):
+        cur = settings.setdefault("postproc",
+                                  copy.deepcopy(constants.DEFAULTS["postproc"]))
+        for k, v in pp.items():
+            if k in constants.DEFAULTS["postproc"]:
+                cur[k] = v
+
+    m = restored.get("metrics")
+    if isinstance(m, dict):
+        cm = settings["metrics"]
+        for k in ("v_op1", "v_op2", "area", "area_unit"):
+            if k in m:
+                cm[k] = m[k]
+        irr = m.get("irradiance")
+        if isinstance(irr, dict):
+            # 이 파일에 실제로 있는 파장만 되살린다.
+            for lb in list(cm["irradiance"]):
+                if lb in irr:
+                    cm["irradiance"][lb] = irr[lb]
+
+    vis = restored.get("visible")
+    if isinstance(vis, dict):
+        seen = {}
+        for tk, tr in settings["traces"].items():
+            lb = tr["label"]
+            seen[lb] = seen.get(lb, 0) + 1
+            nm = lb if seen[lb] == 1 else f"{lb} #{seen[lb]}"
+            if isinstance(vis.get(nm), bool):
+                tr["visible"] = vis[nm]
+
+
 # ---------------- 파일 ----------------
 def add_file(name, data):
     """파일 추가 -> fid 반환. 같은 sha1 이면 기존 fid 를 그대로 돌려준다(중복 제거)."""
@@ -110,6 +156,9 @@ def add_file(name, data):
     # 파일명 (샘플명) 을 인셋 샘플 이름에 자동 반영 (없으면 빈 값 유지).
     if parsed.get("sample"):
         settings["insets"]["sample"]["text_raw"] = parsed["sample"]
+
+    # 이 앱이 내보낸 엑셀을 다시 올린 경우 Info 시트에 적힌 보정 설정을 복원한다.
+    _restore_settings(settings, parsed.get("restored"))
 
     s["files"][fid] = {
         "fid": fid,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import re
 import warnings
 
@@ -102,6 +103,118 @@ def _settings_frame(file_bytes, sheets, engine):
         return _read_excel(file_bytes, engine, sheet_name=key, header=None)
     except Exception:  # noqa: BLE001
         return sheets[key]  # 헤더가 소비된 상태 -> _parse_settings 가 복원 시도
+
+
+# ---------------- 이 앱이 내보낸 엑셀 다시 읽기 ----------------
+# Keithley 원본이 아니라 [내보내기] 로 만든 .xlsx 를 다시 올렸을 때를 처리한다.
+# Raw 시트(원본 전류)를 데이터로 쓰고, Info 시트의 설정 JSON 으로 보정값까지 복원한다.
+_EXPORT_SETTINGS_KEY = "Settings (JSON)"   # summary._SETTINGS_KEY 의 접두사
+
+
+def _sheet_raw(file_bytes, sheets, engine, name):
+    """시트를 header=None 으로 다시 읽는다 (헤더 2줄이 데이터가 아니라 이름·단위라서)."""
+    key = next((k for k in sheets if str(k).strip().lower() == name.lower()), None)
+    if key is None:
+        return None
+    try:
+        return _read_excel(file_bytes, engine, sheet_name=key, header=None)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _export_info(df):
+    """Info 시트를 {키: 값} 으로. 설정 JSON 은 파싱해 'settings' 로 따로 담는다."""
+    out, settings = {}, None
+    if not isinstance(df, pd.DataFrame) or df.empty or df.shape[1] < 2:
+        return out, settings
+    for i in range(len(df)):
+        k = df.iloc[i, 0]
+        v = df.iloc[i, 1]
+        if k is None or (isinstance(k, float) and pd.isna(k)):
+            continue
+        k = str(k).strip()
+        if k.startswith(_EXPORT_SETTINGS_KEY):
+            try:
+                settings = json.loads(str(v))
+            except Exception:  # noqa: BLE001
+                settings = None
+            continue
+        out[k] = v
+    return out, settings
+
+
+def _export_traces(df):
+    """Raw/Processed 시트 → [(이름, V, I)].
+
+    1행=Long Name, 2행=Units. 단위가 'V' 인 열이 X 이고, 그 뒤의 'A' 열들이 그 X 를
+    공유하는 Y 다. 구형(트레이스마다 V,A 반복)·신형(X 공유) 배치가 모두 이 규칙으로
+    읽힌다 — 열 이름 형식에 기대지 않아 포맷이 바뀌어도 덜 깨진다.
+    """
+    if not isinstance(df, pd.DataFrame) or len(df) < 3 or df.shape[1] < 2:
+        return []
+    names = [("" if pd.isna(x) else str(x).strip()) for x in df.iloc[0]]
+    units = [("" if pd.isna(x) else str(x).strip().upper()) for x in df.iloc[1]]
+    body = df.iloc[2:].reset_index(drop=True)
+
+    out, cur_v = [], None
+    for c in range(df.shape[1]):
+        col = pd.to_numeric(body[c], errors="coerce").to_numpy(dtype=float)
+        if units[c] == "V":
+            cur_v = col
+        elif units[c] == "A" and cur_v is not None:
+            nm = names[c]
+            for suffix in (" |I|", " I"):      # 신형 '940 nm |I|' / 구형 '940 nm I'
+                if nm.endswith(suffix):
+                    nm = nm[: -len(suffix)]
+                    break
+            m = np.isfinite(cur_v) & np.isfinite(col)
+            if int(m.sum()) >= 2:
+                out.append((nm.strip(), cur_v[m], col[m]))
+    return out
+
+
+def _parse_exported(file_bytes, sheets, engine):
+    """내보낸 엑셀이면 파싱 결과를, 아니면 None 을 돌려준다.
+
+    전류는 **Raw 시트**(무보정·부호 유지)를 쓴다. Processed/Plot 은 보정이 이미 들어간
+    값이라 다시 올리면 보정이 두 번 걸린다.
+    """
+    raw = _sheet_raw(file_bytes, sheets, engine, "Raw")
+    items = _export_traces(raw)
+    if not items:
+        return None
+
+    info_map, restored = _export_info(_sheet_raw(file_bytes, sheets, engine, "Info"))
+    range_i = (restored or {}).get("range_i") or {}
+
+    traces, warns = [], []
+    seen = {}
+    for nm, v, i in items:
+        label = nm.split(" #")[0].strip() or nm       # 'Dark #2' → 'Dark'
+        seen[label] = seen.get(label, 0) + 1
+        traces.append({
+            "label": label,
+            "df": pd.DataFrame({"AnodeV": v, "AnodeI": i}),
+            "range_i": str(range_i.get(nm, info_map.get(nm, "N/A")) or "N/A"),
+            "sheets": ["Raw"],
+        })
+    for t in traces:
+        seen[t["label"]] = seen.get(t["label"], 0)
+    warns.append("이 앱이 내보낸 엑셀을 다시 읽었습니다 — 전류는 보정 전 `Raw` 시트를 "
+                 "사용합니다." + (" 저장된 보정 설정도 복원했습니다."
+                                  if restored else " (설정 정보가 없어 기본값으로 엽니다.)"))
+
+    seen2 = {}
+    for t in traces:
+        seen2[t["label"]] = seen2.get(t["label"], 0) + 1
+        suffix = "" if seen2[t["label"]] == 1 else f" #{seen2[t['label']]}"
+        t["legend"] = f"{t['label']} ({t['range_i']}){suffix}"
+
+    sample = str(info_map.get("Sample") or "").strip()
+    return {"traces": traces, "warnings": warns,
+            "data_names": [nm for nm, _, _ in items],
+            "sample": sample, "i_offset": _dark_zero_offset(traces),
+            "restored": restored}
 
 
 def _parse_settings(df):
@@ -203,6 +316,10 @@ def parse_file(file_bytes, file_name):
     data_names = [n for n, d in sheets.items() if _is_data_sheet(d)]
     data_names.sort(key=_sheet_sort_key)
     if not data_names:
+        # Keithley 원본이 아니면 이 앱이 내보낸 엑셀일 수 있다 (Raw/Info 시트).
+        exported = _parse_exported(file_bytes, sheets, engine)
+        if exported is not None:
+            return exported
         raise ValueError("AnodeV / AnodeI 컬럼을 가진 데이터 시트를 찾지 못했습니다.")
 
     frames = {}
@@ -256,5 +373,7 @@ def parse_file(file_bytes, file_name):
         t["legend"] = f"{t['label']} ({t['range_i']}){suffix}"
 
     # df 는 raw 그대로 둔다. 0V 오프셋은 값만 실어 보내고 그래프에서만 뺀다.
+    # restored=None → Keithley 원본이라 복원할 설정이 없다는 뜻.
     return {"traces": traces, "warnings": warns, "data_names": data_names,
-            "sample": sample, "i_offset": _dark_zero_offset(traces)}
+            "sample": sample, "i_offset": _dark_zero_offset(traces),
+            "restored": None}
