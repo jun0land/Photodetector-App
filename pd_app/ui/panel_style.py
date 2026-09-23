@@ -179,6 +179,34 @@ def _postproc(ctx) -> None:
     else:
         st.caption(f"대상: {', '.join(split)} — 각 라벨의 첫 조각을 기준으로 맞춥니다.")
 
+    if split and p["stitch"]:
+        modes = list(postproc.STITCH_MODES)
+        cur_m = p.get("stitch_mode", "shift")
+        p["stitch_mode"] = st.radio(
+            "잇는 방식", modes,
+            index=modes.index(cur_m) if cur_m in modes else 0,
+            format_func=lambda k: postproc.STITCH_MODES[k],
+            key=state.wkey("postproc", "stitch_mode", fid=fid),
+            help="**평행이동** — 조각 전체를 옮겨 단차만 없앱니다. 모양이 그대로 보존되는 "
+                 "대신 접합부 기울기 차이(꺾임)는 남습니다.\n\n"
+                 "**테이퍼** — 이동량을 접합부에서만 100%, 지정 반경 밖에서 0 으로 "
+                 "줄입니다. 먼 쪽 끝값이 원본 그대로 남습니다.\n\n"
+                 "**블렌드** — 평행이동 후 접합부 구간을 양쪽 공통 직선으로 섞어 "
+                 "기울기까지 잇습니다. 가장 매끄럽지만 **그 구간 값은 합성값**입니다.",
+        )
+        if p["stitch_mode"] != "shift":
+            p["stitch_span"] = st.number_input(
+                "접합부 반경 (V)",
+                min_value=postproc.SPAN_MIN, max_value=postproc.SPAN_MAX,
+                value=float(p.get("stitch_span", 0.05)), step=0.005, format="%.3f",
+                key=state.wkey("postproc", "stitch_span", fid=fid),
+                help="접합부 좌우 이 범위만 손댑니다. 좁을수록 원본에 가깝고, "
+                     "넓을수록 매끄럽습니다.",
+            )
+        if p["stitch_mode"] == "blend":
+            st.warning(f"접합부 ±{p.get('stitch_span', 0.05):g}V 구간은 **합성값**입니다. "
+                       "원본은 엑셀 `Raw` 시트에 그대로 남습니다.", icon="⚠️")
+
     st.markdown("---")
 
     # --- 스무딩 ---

@@ -25,8 +25,16 @@ SMOOTH_METHODS = {
 }
 TARGETS = {"all": "전체", "light": "광 트레이스만"}
 
+# 접합부를 어떻게 이을지. 아래로 갈수록 보기엔 매끄럽지만 원본에서 멀어진다.
+STITCH_MODES = {
+    "shift": "평행이동 (전체)",
+    "taper": "테이퍼 (접합부만)",
+    "blend": "블렌드 (기울기까지)",
+}
+
 WINDOW_MIN, WINDOW_MAX = 3, 51
 POLY_MIN, POLY_MAX = 1, 5
+SPAN_MIN, SPAN_MAX = 0.005, 0.5
 
 
 def cfg(settings) -> dict:
@@ -46,8 +54,17 @@ def cfg(settings) -> dict:
         poly = int(p.get("poly", 2))
     except (TypeError, ValueError):
         poly = 2
+    mode = p.get("stitch_mode", "shift")
+    if mode not in STITCH_MODES:
+        mode = "shift"
+    try:
+        span = float(p.get("stitch_span", 0.05))
+    except (TypeError, ValueError):
+        span = 0.05
     return {
         "stitch": bool(p.get("stitch", False)),
+        "stitch_mode": mode,
+        "stitch_span": min(max(span, SPAN_MIN), SPAN_MAX),
         "smooth": smooth,
         "window": min(max(window, WINDOW_MIN), WINDOW_MAX),
         "poly": min(max(poly, POLY_MIN), POLY_MAX),
@@ -65,7 +82,10 @@ def describe(settings) -> str:
     c = cfg(settings)
     parts = []
     if c["stitch"]:
-        parts.append("이어붙이기")
+        tag = STITCH_MODES[c["stitch_mode"]]
+        if c["stitch_mode"] != "shift":
+            tag += f"(±{c['stitch_span']:g}V)"
+        parts.append(f"이어붙이기·{tag}")
     if c["smooth"] != "none":
         extra = f"·{c['poly']}차" if c["smooth"] == "savgol" else ""
         parts.append(f"{SMOOTH_METHODS[c['smooth']]}(창 {c['window']}{extra}, "
@@ -137,15 +157,56 @@ def _junction(v1: np.ndarray, v2: np.ndarray) -> float:
     return 0.5 * (v2.max() + v1.min())
 
 
-def _align(out, ref_k: int, k: int) -> None:
-    """조각 k 를 이미 자리잡은 ref_k 에 맞춰 평행이동. 기울기는 건드리지 않는다."""
+def _taper_w(dist: np.ndarray, span: float) -> np.ndarray:
+    """접합부에서 1, span 만큼 떨어지면 0 이 되는 부드러운 가중치 (양끝 기울기 0)."""
+    d = np.clip(np.abs(dist) / max(span, 1e-12), 0.0, 1.0)
+    return 0.5 * (1.0 + np.cos(np.pi * d))
+
+
+def _align(out, ref_k: int, k: int, mode: str, span: float) -> float:
+    """조각 k 를 이미 자리잡은 ref_k 에 맞춘다. 접합 전압을 반환.
+
+    shift  조각 전체를 delta 만큼 평행이동 — 모양이 완전히 보존된다.
+    taper  delta 를 접합부에서만 100%, span 밖에서 0 으로 감쇠 — 먼 쪽 끝값은 그대로.
+    blend  일단 shift 와 같이 전체 이동 (기울기 잇기는 _blend_junction 이 뒤에 한다).
+    """
     vr, ir = out[ref_k]
     v, i = out[k]
     x = _junction(vr, v)
-    out[k][1] = i + (_value_near(vr, ir, x) - _value_near(v, i, x))
+    delta = _value_near(vr, ir, x) - _value_near(v, i, x)
+    out[k][1] = i + (delta * _taper_w(v - x, span) if mode == "taper" else delta)
+    return x
 
 
-def _stitch_group(out, ks: list[int]) -> None:
+def _blend_junction(out, k1: int, k2: int, x: float, span: float) -> None:
+    """접합부 ±span 을 양쪽 공통 직선 쪽으로 섞어 **기울기까지** 잇는다.
+
+    ⚠️ 이 구간 값은 측정값이 아니라 합성값이다. 평행이동과 달리 원본 모양을 바꾼다.
+    두 조각의 접합부 구간을 함께 직선으로 적합한 뒤, 접합부에서 1·span 에서 0 인
+    가중치로 원본과 섞는다 — 접합부에서는 양쪽 모두 같은 직선이 되어 값·기울기가
+    이어지고, span 바깥은 원본 그대로다.
+    """
+    v1, i1 = out[k1]
+    v2, i2 = out[k2]
+    m1 = np.abs(v1 - x) <= span
+    m2 = np.abs(v2 - x) <= span
+    if int(m1.sum()) < 2 or int(m2.sum()) < 2:
+        return                       # 접합부 표본이 너무 적으면 건드리지 않는다
+    vv = np.concatenate([v1[m1], v2[m2]])
+    ii = np.concatenate([i1[m1], i2[m2]])
+    good = np.isfinite(vv) & np.isfinite(ii)
+    if int(good.sum()) < 2:
+        return
+    coef = np.polyfit(vv[good], ii[good], 1)
+    for k, mask in ((k1, m1), (k2, m2)):
+        v, i = out[k]
+        i = i.copy()
+        w = _taper_w(v[mask] - x, span)
+        i[mask] = w * np.polyval(coef, v[mask]) + (1.0 - w) * i[mask]
+        out[k][1] = i
+
+
+def _stitch_group(out, ks: list[int], mode: str, span: float) -> None:
     """같은 라벨의 조각들을 전압 순으로 사슬처럼 이어 붙인다.
 
     기준(움직이지 않는 조각)은 **측정 순서상 첫 조각**이다. 거기서 좌우로 뻗어나가며
@@ -154,10 +215,14 @@ def _stitch_group(out, ks: list[int]) -> None:
     center = {k: 0.5 * (out[k][0].min() + out[k][0].max()) for k in ks}
     order = sorted(ks, key=lambda k: center[k])
     a = order.index(min(ks))
-    for p in range(a + 1, len(order)):
-        _align(out, order[p - 1], order[p])
-    for p in range(a - 1, -1, -1):
-        _align(out, order[p + 1], order[p])
+
+    pairs = [(order[p - 1], order[p]) for p in range(a + 1, len(order))]
+    pairs += [(order[p + 1], order[p]) for p in range(a - 1, -1, -1)]
+
+    juncs = [(ref, k, _align(out, ref, k, mode, span)) for ref, k in pairs]
+    if mode == "blend":
+        for ref, k, x in juncs:
+            _blend_junction(out, ref, k, x, span)
 
 
 # ---------------- 진입점 ----------------
@@ -189,6 +254,6 @@ def process(parsed, settings) -> list[tuple[np.ndarray, np.ndarray]]:
             by_label.setdefault(t["label"], []).append(k)
         for ks in by_label.values():
             if len(ks) >= 2:
-                _stitch_group(out, ks)
+                _stitch_group(out, ks, c["stitch_mode"], c["stitch_span"])
 
     return [(v, i) for v, i in out]

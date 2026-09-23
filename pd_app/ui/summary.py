@@ -524,34 +524,72 @@ def _export_traces(ctx) -> list[dict]:
     return items
 
 
-def _write_xy_sheet(ws, items, source) -> None:
-    """트레이스별 (V, I) 열 쌍을 나란히 쓴다 — Origin 이 X/Y 로 바로 지정할 수 있는 배치.
+def _same_x(a, b) -> bool:
+    """두 스윕이 같은 X 축을 쓰는가.
 
-    1행 = Long Name, 2행 = Units (Origin 의 헤더 관례). 3행부터 데이터.
-    트레이스마다 점 개수가 달라도 각자 열이므로 문제 없다.
+    허용오차는 **스텝 크기의 5%**. 장비가 매 스윕 실측 전압을 기록하면 같은 설정이어도
+    µV 수준으로 흔들린다 (실측: 신형 Keithley 산출물에서 파장 간 최대 3µV 차이,
+    스텝은 0.01V — 0.03%). 고정 허용오차로는 이걸 다른 축으로 오판한다.
+    """
+    if len(a) != len(b) or len(a) < 2:
+        return False
+    step = float(np.median(np.abs(np.diff(a))))
+    tol = max(step * 0.05, 1e-9)
+    d = np.abs(a - b)
+    return bool(np.all(np.isnan(d) | (d <= tol)))
+
+
+def _write_xy_sheet(ws, items, source) -> str:
+    """X 가 같은 트레이스끼리 **X 열 하나를 공유**하도록 쓴다.
+
+    배치는 [X][Y][Y]…[X][Y]… — Origin 이 "왼쪽 X 를 오른쪽 Y 들이 공유"로 읽는
+    바로 그 관례다. 파장마다 X 를 반복하면 Origin 에서 매번 열 지정을 다시 해야 해서
+    불편하다는 요청에 따른 배치다.
+
+    1행 = Long Name, 2행 = Units. 3행부터 데이터. 점 개수가 다른 조각(Dark 0→-1V /
+    0→+1V 처럼)은 자연히 별도 X 그룹이 된다.
     `source(item) -> (v, i)` 가 어떤 단계의 값을 쓸지 정한다.
+    반환값은 X 공유 시 생긴 최대 X 편차 요약 (없으면 빈 문자열).
     """
     from openpyxl.styles import Font, Alignment
     from openpyxl.utils import get_column_letter
 
-    bold = Font(bold=True)
-    center = Alignment(horizontal="center")
-    col = 1
+    # --- X 가 같은 것끼리 묶기 ---
+    groups: list[dict] = []
+    max_dev = 0.0
     for it in items:
         v, i = source(it)
         v = np.asarray(v, dtype=float)
         i = np.asarray(i, dtype=float)
+        g = next((g for g in groups if _same_x(g["v"], v)), None)
+        if g is None:
+            groups.append({"v": v, "cols": [(it["name"], i)]})
+        else:
+            d = np.abs(g["v"] - v)
+            if np.isfinite(d).any():
+                max_dev = max(max_dev, float(np.nanmax(d)))
+            g["cols"].append((it["name"], i))
 
-        for j, (title, unit, arr) in enumerate(((f"{it['name']} V", "V", v),
-                                                (f"{it['name']} I", "A", i))):
-            c = ws.cell(row=1, column=col + j, value=title); c.font = bold; c.alignment = center
-            c = ws.cell(row=2, column=col + j, value=unit); c.alignment = center
-            for r, val in enumerate(arr, start=3):
-                ws.cell(row=r, column=col + j,
-                        value=(None if not np.isfinite(val) else float(val)))
-            ws.column_dimensions[get_column_letter(col + j)].width = 16
-        col += 2
+    bold = Font(bold=True)
+    center = Alignment(horizontal="center")
+
+    def put(col, title, unit, arr):
+        c = ws.cell(row=1, column=col, value=title); c.font = bold; c.alignment = center
+        c = ws.cell(row=2, column=col, value=unit); c.alignment = center
+        for r, val in enumerate(arr, start=3):
+            ws.cell(row=r, column=col,
+                    value=(None if not np.isfinite(val) else float(val)))
+        ws.column_dimensions[get_column_letter(col)].width = 16
+
+    col = 1
+    for g in groups:
+        put(col, "Voltage", "V", g["v"])
+        col += 1
+        for name, arr in g["cols"]:
+            put(col, name, "A", arr)
+            col += 1
     ws.freeze_panes = "A3"
+    return (f"{max_dev:.3e} V" if max_dev > 0 else "")
 
 
 def _excel_bytes(ctx, metric_rows) -> bytes:
@@ -590,7 +628,7 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
     wb = Workbook()
 
     ws = wb.active; ws.title = "Raw"
-    _write_xy_sheet(ws, items, raw_src)
+    x_dev = _write_xy_sheet(ws, items, raw_src)
 
     ws = wb.create_sheet("Processed")
     _write_xy_sheet(ws, items, proc_src)
@@ -652,6 +690,8 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
         ("Dark 0V offset value (A)", parsed.get("i_offset")),
         ("Post-processing (Processed·Plot)", postproc.describe(settings)),
         ("Metrics computed from", "Raw (후처리·오프셋 미적용)"),
+        # X 를 공유시키면 그룹 대표 X 를 쓰므로, 스윕 간 실측 전압 차이가 있었다면 남긴다.
+        ("Shared-X max deviation", x_dev or "0 (완전 일치)"),
     ]
     for r, (k, v) in enumerate(info, start=1):
         ws.cell(row=r, column=1, value=k).font = bold

@@ -134,6 +134,8 @@ DEFAULTS = {
     # 성능지표(R·D*)는 이 설정과 무관하게 항상 raw 로 계산한다.
     "postproc": {
         "stitch": False,     # 같은 라벨의 분할 측정(Dark 0→-1V / 0→+1V)을 이어 붙임
+        "stitch_mode": "shift",   # shift | taper | blend
+        "stitch_span": 0.05,      # taper·blend 가 손대는 접합부 반경 (V)
         "smooth": "none",    # none | movavg | savgol
         "window": 7,         # 창 크기(점 개수, 홀수)
         "poly": 2,           # savgol 다항 차수
