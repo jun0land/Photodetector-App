@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import streamlit as st
@@ -656,12 +657,6 @@ _PEEK_JS = """
 <script>
 (function () {
   var doc = document;
-  // rerun 마다 figure 가 바뀌므로 오버레이는 지우고 다시 만든다.
-  var old = doc.getElementById('pd-peek-overlay');
-  if (old) { try { if (window.Plotly) Plotly.purge(old); } catch (e) {} old.remove(); }
-  var oldBadge = doc.querySelector('.pd-peek-badge');
-  if (oldBadge) oldBadge.remove();
-
   var btn = doc.getElementById('pd-peek-btn');
   if (!btn) return;
   // 내용 폭에 맞춘 작은 버튼 (width:100% 면 컬럼 전체를 쓸데없이 차지한다)
@@ -672,25 +667,37 @@ _PEEK_JS = """
     + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
 
   var fig = __PD_RAW_FIG__;
+  var SIG = '__PD_RAW_SIG__';
   var LABEL = '👁 원본 보기';
 
-  // 차트가 아직 배치 전이면 clientWidth 가 0 이다. 한 번 보고 포기하지 말고
-  // 몇 프레임 기다린다 — 예전엔 여기서 버튼을 조용히 비활성화해 버렸다.
-  var tries = 0;
-  (function setup() {
+  // 오버레이를 '필요할 때 보장' 한다. 그냥 한 번 만들어 두면 죽는 경우가 있다:
+  //   · 원본 figure 는 보정 설정과 **무관**하므로, 보정을 바꿔도 주입 HTML 이 그대로다
+  //     → Streamlit(React)이 이 블록의 effect 를 다시 돌리지 않는다. 그 사이 차트 DOM 은
+  //       새로 그려져, 옛 차트에 붙어 있던 오버레이가 고아가 된다.
+  //   · 스크립트 실행 시점에 차트가 아직 배치 전이면 크기가 0 이다.
+  // 그래서 만들어 두되, 누를 때마다 '지금 차트에 제대로 붙어 있는지' 확인하고
+  // 아니면 그 자리에서 다시 만든다.
+  function ensure() {
     var host = doc.querySelector('[data-testid="stPlotlyChart"]');
-    var w = host ? host.clientWidth : 0;
-    var h = host ? host.clientHeight : 0;
-    if (typeof Plotly === 'undefined' || !host || !w || !h) {
-      if (++tries < 40) { requestAnimationFrame(setup); return; }
-      btn.disabled = true;
-      btn.textContent = '원본 보기 (그래프를 찾지 못했습니다)';
-      return;
+    if (!host || typeof Plotly === 'undefined') return null;
+    var w = host.clientWidth, h = host.clientHeight;
+    if (!w || !h) return null;
+
+    var ov = doc.getElementById('pd-peek-overlay');
+    // ov.data 확인이 핵심: 차트 컨테이너가 cloneNode 로 복제되면 오버레이도 같이 복사돼
+    // 겉보기 조건은 다 통과하지만 Plotly 상태가 없는 껍데기다. 그런 건 다시 그린다.
+    if (ov && host.contains(ov) && ov.data && ov.dataset.pdSig === SIG
+        && ov.dataset.pdW === String(w) && ov.dataset.pdH === String(h)) {
+      return ov;                       // 그대로 재사용 (다시 그리지 않는다)
     }
+    if (ov) { try { Plotly.purge(ov); } catch (e) {} ov.remove(); }
+    var ob = doc.querySelector('.pd-peek-badge');
+    if (ob) ob.remove();
 
     host.style.position = 'relative';
-    var ov = doc.createElement('div');
+    ov = doc.createElement('div');
     ov.id = 'pd-peek-overlay';
+    ov.dataset.pdSig = SIG; ov.dataset.pdW = String(w); ov.dataset.pdH = String(h);
     // display:none 이면 Plotly 가 크기를 0 으로 잡는다 → 보이되 투명하게 두고
     // pointer-events:none 으로 아래 차트의 hover 를 막지 않는다.
     ov.style.cssText = 'position:absolute;left:0;top:0;opacity:0;pointer-events:none;'
@@ -698,7 +705,6 @@ _PEEK_JS = """
     ov.style.width = w + 'px';
     ov.style.height = h + 'px';
     host.appendChild(ov);
-
     Plotly.newPlot(ov, fig.data, fig.layout,
                    {staticPlot: true, displayModeBar: false, responsive: false});
 
@@ -710,26 +716,35 @@ _PEEK_JS = """
       + 'border-radius:10px;background:#ed542b;color:#fff;font-size:11px;font-weight:600;'
       + 'pointer-events:none;opacity:0;transition:opacity .06s linear;';
     host.appendChild(badge);
+    return ov;
+  }
 
-    var on = function (e) {
-      if (e) e.preventDefault();
-      ov.style.opacity = '1'; badge.style.opacity = '1';
-      btn.textContent = '원본 표시 중';
-      btn.style.borderColor = '#ed542b'; btn.style.color = '#ed542b';
-    };
-    var off = function () {
-      ov.style.opacity = '0'; badge.style.opacity = '0';
-      btn.textContent = LABEL;
-      btn.style.borderColor = 'rgba(49,51,63,.2)'; btn.style.color = 'rgb(49,51,63)';
-    };
-    btn.addEventListener('mousedown', on);
-    btn.addEventListener('touchstart', on, {passive: false});
-    btn.addEventListener('mouseleave', off);
-    // 버튼 밖에서 손을 떼도 반드시 돌아오게 한다.
-    window.addEventListener('mouseup', off);
-    window.addEventListener('touchend', off);
-    window.addEventListener('touchcancel', off);
-    window.addEventListener('blur', off);
+  function show(on) {
+    var ov = on ? ensure() : doc.getElementById('pd-peek-overlay');
+    var badge = doc.querySelector('.pd-peek-badge');
+    if (ov) ov.style.opacity = on ? '1' : '0';
+    if (badge) badge.style.opacity = on ? '1' : '0';
+    btn.textContent = on ? (ov ? '원본 표시 중' : '원본을 불러오지 못했습니다') : LABEL;
+    btn.style.borderColor = on ? '#ed542b' : 'rgba(49,51,63,.2)';
+    btn.style.color = on ? '#ed542b' : 'rgb(49,51,63)';
+  }
+
+  var onDown = function (e) { if (e) e.preventDefault(); show(true); };
+  var onUp = function () { show(false); };
+  btn.addEventListener('mousedown', onDown);
+  btn.addEventListener('touchstart', onDown, {passive: false});
+  btn.addEventListener('mouseleave', onUp);
+  // 버튼 밖에서 손을 떼도 반드시 돌아오게 한다.
+  window.addEventListener('mouseup', onUp);
+  window.addEventListener('touchend', onUp);
+  window.addEventListener('touchcancel', onUp);
+  window.addEventListener('blur', onUp);
+
+  // 첫 누름이 즉시 반응하도록 미리 만들어 둔다 (실패해도 누를 때 다시 시도한다).
+  var tries = 0;
+  (function warm() {
+    if (ensure()) return;
+    if (++tries < 40) requestAnimationFrame(warm);
   })();
 })();
 </script>
@@ -741,8 +756,12 @@ def raw_peek(fig_json: str) -> None:
 
     `fig_json` 은 `figure.build_figure(..., raw=True).to_json()` 결과여야 한다.
     보정이 하나도 안 켜져 있으면 비교할 게 없으므로 호출하지 않는 것이 맞다.
+
+    figure 가 바뀌었는지 판별할 서명을 함께 넘긴다 — 오버레이에 심어 두고, 누를 때
+    현재 figure 와 다르면 다시 그린다.
     """
-    st.html(_PEEK_JS.replace("__PD_RAW_FIG__", fig_json),
+    sig = hashlib.sha1(fig_json.encode("utf-8")).hexdigest()[:12]
+    st.html(_PEEK_JS.replace("__PD_RAW_FIG__", fig_json).replace("__PD_RAW_SIG__", sig),
             unsafe_allow_javascript=True)
 
 
