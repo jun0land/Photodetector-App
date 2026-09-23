@@ -363,6 +363,39 @@ def _stitch_group(out, ks: list[int], mode: str, span: float) -> None:
 
 
 # ---------------- 진입점 ----------------
+def crossings_in_join_window(parsed, left: float, right: float) -> list[tuple[str, float]]:
+    """이어붙이기가 손대는 구간 안에 들어오는 0 교차점 [(라벨, 전압), …].
+
+    윈도 안을 다시 그리면 그 안의 0 교차점은 **없어지지는 않지만 위치가 옮겨간다**
+    (실측 0s_4: 오른쪽 0.15V→0.40V 로 넓히자 교차점이 +0.2095 → +0.2946 으로 이동).
+    로그축에서 골짜기 위치가 곧 교차점이라 사용자가 알아야 한다.
+    """
+    by: dict[str, list[int]] = {}
+    for k, t in enumerate(parsed["traces"]):
+        by.setdefault(t["label"], []).append(k)
+
+    found = []
+    for label, ks in by.items():
+        if len(ks) < 2:
+            continue                       # 이어붙이기 대상이 아니면 건드리지 않는다
+        arrs = [(parsed["traces"][k]["df"]["AnodeV"].to_numpy(dtype=float),
+                 parsed["traces"][k]["df"]["AnodeI"].to_numpy(dtype=float)) for k in ks]
+        order = sorted(range(len(ks)), key=lambda j: 0.5 * (arrs[j][0].min() + arrs[j][0].max()))
+        for a, b in zip(order, order[1:]):
+            x = _junction(arrs[a][0], arrs[b][0])
+            lo, hi = x - left, x + right
+            for v, i in (arrs[a], arrs[b]):
+                s = np.sign(i)
+                for j in np.flatnonzero(s[:-1] * s[1:] < 0):
+                    denom = i[j + 1] - i[j]
+                    if denom == 0:
+                        continue
+                    xc = float(v[j] + (v[j + 1] - v[j]) * (-i[j]) / denom)
+                    if lo <= xc <= hi:
+                        found.append((label, xc))
+    return found
+
+
 def taper_slope_ratio(parsed, span: float) -> float | None:
     """테이퍼가 접합부에 **더하는** 기울기가 데이터 자체 기울기의 몇 배인지.
 

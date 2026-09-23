@@ -224,7 +224,14 @@ def _postproc(ctx) -> None:
             )
             st.caption(f"다시 그리는 범위: **-{p['stitch_left']:g}V ~ +{p['stitch_right']:g}V** "
                        "— 이 안은 합성값이고 바깥은 원본 그대로입니다.")
-            st.caption("구간을 너무 넓히면 그 안의 골짜기(0 교차점)까지 지워질 수 있습니다.")
+            # 윈도 안에 0 교차점이 들어오면 골짜기 위치가 옮겨간다. 숫자로 알려준다.
+            inw = postproc.crossings_in_join_window(
+                ctx.parsed, float(p["stitch_left"]), float(p["stitch_right"]))
+            if inw:
+                where = ", ".join(f"{lb} {v:+.3f}V" for lb, v in inw[:4])
+                st.warning(f"구간 안에 0 교차점이 있습니다 ({where}). 다시 그리면 "
+                           "**골짜기 위치가 옮겨갑니다** — 구간을 좁히면 원래 자리에 남습니다.",
+                           icon="⚠️")
 
         if p["stitch_mode"] in ("taper", "blend"):
             p["stitch_span"] = st.number_input(
