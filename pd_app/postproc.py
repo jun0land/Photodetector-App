@@ -31,6 +31,7 @@ TARGETS = {"all": "전체", "light": "광 트레이스만"}
 #    밀린다.** 실측: 14s_1 Dark 골짜기가 +0.65V → +0.99V 로 이동하고 깊이도 29배
 #    얕아졌다. 암전류 골짜기를 0V 에 두려면 zero 를 쓸 것.
 STITCH_MODES = {
+    "smooth": "자연스럽게 잇기 (좌·우 구간 지정)",
     "zero": "영점 정렬 (0V를 0으로)",
     "shift": "평행이동 (전체)",
     "taper": "테이퍼 (접합부만)",
@@ -40,6 +41,8 @@ STITCH_MODES = {
 WINDOW_MIN, WINDOW_MAX = 3, 51
 POLY_MIN, POLY_MAX = 1, 5
 SPAN_MIN, SPAN_MAX = 0.005, 1.0
+# smooth 모드의 좌·우 구간 (0V 기준, 각각 따로 지정)
+SIDE_MIN, SIDE_MAX = 0.01, 1.0
 
 
 def cfg(settings) -> dict:
@@ -59,17 +62,27 @@ def cfg(settings) -> dict:
         poly = int(p.get("poly", 2))
     except (TypeError, ValueError):
         poly = 2
-    mode = p.get("stitch_mode", "zero")
+    mode = p.get("stitch_mode", "smooth")
     if mode not in STITCH_MODES:
-        mode = "zero"
+        mode = "smooth"
     try:
         span = float(p.get("stitch_span", 0.5))
     except (TypeError, ValueError):
         span = 0.5
+    try:
+        left = float(p.get("stitch_left", 0.15))
+    except (TypeError, ValueError):
+        left = 0.15
+    try:
+        right = float(p.get("stitch_right", 0.15))
+    except (TypeError, ValueError):
+        right = 0.15
     return {
         "stitch": bool(p.get("stitch", False)),
         "stitch_mode": mode,
         "stitch_span": min(max(span, SPAN_MIN), SPAN_MAX),
+        "stitch_left": min(max(left, SIDE_MIN), SIDE_MAX),
+        "stitch_right": min(max(right, SIDE_MIN), SIDE_MAX),
         "smooth": smooth,
         "window": min(max(window, WINDOW_MIN), WINDOW_MAX),
         "poly": min(max(poly, POLY_MIN), POLY_MAX),
@@ -88,7 +101,9 @@ def describe(settings) -> str:
     parts = []
     if c["stitch"]:
         tag = STITCH_MODES[c["stitch_mode"]]
-        if c["stitch_mode"] != "shift":
+        if c["stitch_mode"] == "smooth":
+            tag += f"(-{c['stitch_left']:g}V ~ +{c['stitch_right']:g}V)"
+        elif c["stitch_mode"] in ("taper", "blend"):
             tag += f"(±{c['stitch_span']:g}V)"
         parts.append(f"이어붙이기·{tag}")
     if c["smooth"] != "none":
@@ -211,6 +226,71 @@ def _blend_junction(out, k1: int, k2: int, x: float, span: float) -> None:
         out[k][1] = i
 
 
+def _edge_state(v: np.ndarray, i: np.ndarray, bound: float, keep_left: bool,
+                npts: int = 8):
+    """`bound` 에서의 값과 기울기를 **윈도 바깥** 점들로 추정. (값, 기울기) 또는 None.
+
+    윈도 안쪽은 어차피 다시 그려질 구간이라 추정에 쓰면 안 된다. 바깥 점 몇 개로
+    직선을 맞춰 경계값·기울기를 읽으면 노이즈에 덜 흔들린다.
+    """
+    o = np.argsort(v)
+    vs, iv = v[o], i[o]
+    m = (vs <= bound) if keep_left else (vs >= bound)
+    if int(m.sum()) < 2:
+        return None
+    vv, ii = vs[m], iv[m]
+    vv, ii = (vv[-npts:], ii[-npts:]) if keep_left else (vv[:npts], ii[:npts])
+    good = np.isfinite(vv) & np.isfinite(ii)
+    if int(good.sum()) < 2:
+        return None
+    c = np.polyfit(vv[good], ii[good], 1)
+    return float(np.polyval(c, bound)), float(c[0])
+
+
+def _hermite(t, p0, m0, p1, m1):
+    """3차 Hermite. t∈[0,1], m 은 t 기준 기울기(=dI/dV × 구간폭)."""
+    t2 = t * t
+    t3 = t2 * t
+    return ((2 * t3 - 3 * t2 + 1) * p0 + (t3 - 2 * t2 + t) * m0
+            + (-2 * t3 + 3 * t2) * p1 + (t3 - t2) * m1)
+
+
+def _smooth_join(out, k_left: int, k_right: int, x: float,
+                 left: float, right: float) -> None:
+    """접합부 [x-left, x+right] 를 3차 Hermite 로 다시 그린다.
+
+    경계에서 **값과 기울기를 모두** 바깥 데이터에 맞추므로 단차도 꺾임도 없이 이어지고,
+    윈도 안에서 기울기가 연속적으로 변한다. 테이퍼는 상수 오프셋을 창으로 감쌀 뿐이라
+    조각 자체의 기울기 차이(실측 154~185%)를 못 없애는데, 이 방식은 그걸 해결한다.
+
+    윈도 **바깥은 손대지 않으므로** 0 교차점(골짜기)이 밀리지 않는다 — 평행이동·블렌드가
+    골짜기를 옆으로 밀어버리던 문제가 여기엔 없다.
+
+    ⚠️ 윈도 안 값은 측정값이 아니라 합성값이다. 좌·우 폭은 따로 지정한다.
+    """
+    a, b = x - left, x + right
+    if not (b > a):
+        return
+    sl = _edge_state(out[k_left][0], out[k_left][1], a, keep_left=True)
+    sr = _edge_state(out[k_right][0], out[k_right][1], b, keep_left=False)
+    if sl is None or sr is None:
+        return                       # 경계 바깥 표본이 모자라면 건드리지 않는다
+    pa, ka = sl
+    pb, kb = sr
+    width = b - a
+    m0, m1 = ka * width, kb * width
+
+    for k in (k_left, k_right):
+        v, i = out[k]
+        m = (v > a) & (v < b)        # 경계점은 실측값 그대로 둔다
+        if not bool(m.any()):
+            continue
+        t = (v[m] - a) / width
+        i = i.copy()
+        i[m] = _hermite(t, pa, m0, pb, m1)
+        out[k][1] = i
+
+
 def _zero_anchor(out, ks: list[int]) -> None:
     """각 조각에서 **자기 0V 값**을 빼 모두 0V 에서 0 이 되게 한다.
 
@@ -311,7 +391,16 @@ def process(parsed, settings) -> list[tuple[np.ndarray, np.ndarray]]:
         for label, ks in by_label.items():
             if len(ks) < 2:
                 continue
-            if c["stitch_mode"] == "zero":
+            if c["stitch_mode"] == "smooth":
+                # 윈도 안만 다시 그린다 — 평행이동이 없으므로 골짜기가 밀리지 않는다.
+                arrs = [(out[k][0], k) for k in ks]
+                order = [k for _, k in sorted(
+                    arrs, key=lambda p: 0.5 * (p[0].min() + p[0].max()))]
+                for kl, kr in zip(order, order[1:]):
+                    _smooth_join(out, kl, kr,
+                                 _junction(out[kl][0], out[kr][0]),
+                                 c["stitch_left"], c["stitch_right"])
+            elif c["stitch_mode"] == "zero":
                 # 영점 정렬은 암전류에만 물리적 근거가 있다. 광 트레이스가 쪼개져
                 # 있으면 0V 광전류를 지우지 않도록 평행이동으로 대체한다.
                 if label == "Dark":

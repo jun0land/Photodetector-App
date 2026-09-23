@@ -187,7 +187,11 @@ def _postproc(ctx) -> None:
             index=modes.index(cur_m) if cur_m in modes else 0,
             format_func=lambda k: postproc.STITCH_MODES[k],
             key=state.wkey("postproc", "stitch_mode", fid=fid),
-            help="**영점 정렬** — 조각마다 자기 0V 값을 뺍니다. 0 바이어스 암전류는 0 "
+            help="**자연스럽게 잇기** — 0V 기준 좌·우 구간을 3차 곡선으로 다시 그립니다. "
+                 "경계에서 값과 기울기를 모두 바깥 데이터에 맞춰, 단차도 꺾임도 없이 "
+                 "기울기가 연속으로 변합니다. **구간 밖은 손대지 않아 골짜기가 밀리지 "
+                 "않습니다.** 좌·우 폭을 따로 정할 수 있습니다.\n\n"
+                 "**영점 정렬** — 조각마다 자기 0V 값을 뺍니다. 0 바이어스 암전류는 0 "
                  "이어야 하므로 물리적으로도 맞고, **골짜기가 양쪽 모두 정확히 0V 에 "
                  "섭니다.** (광 트레이스가 쪼개져 있으면 0V 광전류를 지우지 않도록 "
                  "평행이동으로 대체합니다.)\n\n"
@@ -201,7 +205,28 @@ def _postproc(ctx) -> None:
         if p["stitch_mode"] in ("shift", "blend"):
             st.caption("⚠️ 이 방식은 조각을 통째로 옮기므로 0 교차점(골짜기)도 함께 "
                        "이동합니다. 골짜기를 0V 에 두려면 **영점 정렬**을 쓰세요.")
-        if p["stitch_mode"] != "shift":
+
+        if p["stitch_mode"] == "smooth":
+            c1, c2 = st.columns(2)
+            p["stitch_left"] = c1.number_input(
+                "0V 왼쪽 구간 (V)",
+                min_value=postproc.SIDE_MIN, max_value=postproc.SIDE_MAX,
+                value=float(p.get("stitch_left", 0.15)), step=0.05, format="%.3f",
+                key=state.wkey("postproc", "stitch_left", fid=fid),
+                help="0V 에서 음(-) 방향으로 이만큼을 다시 그립니다.",
+            )
+            p["stitch_right"] = c2.number_input(
+                "0V 오른쪽 구간 (V)",
+                min_value=postproc.SIDE_MIN, max_value=postproc.SIDE_MAX,
+                value=float(p.get("stitch_right", 0.15)), step=0.05, format="%.3f",
+                key=state.wkey("postproc", "stitch_right", fid=fid),
+                help="0V 에서 양(+) 방향으로 이만큼을 다시 그립니다. 양쪽을 다르게 줘도 됩니다.",
+            )
+            st.caption(f"다시 그리는 범위: **-{p['stitch_left']:g}V ~ +{p['stitch_right']:g}V** "
+                       "— 이 안은 합성값이고 바깥은 원본 그대로입니다.")
+            st.caption("구간을 너무 넓히면 그 안의 골짜기(0 교차점)까지 지워질 수 있습니다.")
+
+        if p["stitch_mode"] in ("taper", "blend"):
             p["stitch_span"] = st.number_input(
                 "접합부 반경 (V)",
                 min_value=postproc.SPAN_MIN, max_value=postproc.SPAN_MAX,
