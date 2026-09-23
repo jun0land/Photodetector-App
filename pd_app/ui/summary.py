@@ -539,7 +539,7 @@ def _same_x(a, b) -> bool:
     return bool(np.all(np.isnan(d) | (d <= tol)))
 
 
-def _write_xy_sheet(ws, items, source) -> str:
+def _write_xy_sheet(ws, items, source, *, y_suffix: str = "") -> str:
     """X 가 같은 트레이스끼리 **X 열 하나를 공유**하도록 쓴다.
 
     배치는 [X][Y][Y]…[X][Y]… — Origin 이 "왼쪽 X 를 오른쪽 Y 들이 공유"로 읽는
@@ -586,7 +586,7 @@ def _write_xy_sheet(ws, items, source) -> str:
         put(col, "Voltage", "V", g["v"])
         col += 1
         for name, arr in g["cols"]:
-            put(col, name, "A", arr)
+            put(col, f"{name}{y_suffix}", "A", arr)
             col += 1
     ws.freeze_panes = "A3"
     return (f"{max_dev:.3e} V" if max_dev > 0 else "")
@@ -595,11 +595,14 @@ def _write_xy_sheet(ws, items, source) -> str:
 def _excel_bytes(ctx, metric_rows) -> bytes:
     """Origin 에서 바로 열어 편집할 수 있는 .xlsx.
 
-    Raw        원본 AnodeV / AnodeI 전 트레이스 (후처리·오프셋 전혀 없음, 부호 유지)
-    Processed  후처리(이어붙이기·스무딩) 적용, 부호 유지 — 후처리가 꺼져 있으면 Raw 와 동일
-    Plot       그래프에 그려진 값 그대로 (Processed + 0V 오프셋 + 로그축이면 |I|, 숨긴 것 제외)
+    Raw        원본 AnodeV / AnodeI 전 트레이스 (후처리·오프셋 전혀 없음, **항상 부호 유지**)
+    Processed  후처리(이어붙이기·스무딩) 적용 — 기본은 |I| (export_abs)
+    Plot       그래프에 그려진 값 그대로 (Processed + 0V 오프셋 + |I|, 숨긴 것 제외)
     Metrics    성능지표 표 + 데이터셋 붙여넣기 블록  ※ 지표는 **항상 Raw** 기준
     Info       파일·샘플·측정 조건·후처리 설정·Range I
+
+    Origin 로그축에 바로 올릴 수 있도록 Processed·Plot 은 기본이 |I| 다. Raw 만은
+    부호를 지킨다 — 부호가 필요하면 Raw 에서 가져오면 된다.
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -619,11 +622,16 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
         df = it["df"]
         return df["AnodeV"].to_numpy(dtype=float), df["AnodeI"].to_numpy(dtype=float)
 
+    # Origin 로그축에 바로 올리려면 양수여야 한다. Raw 는 예외 — 원본 보존이 역할이다.
+    exp_abs = bool(settings.get("export_abs", True))
+    suffix = " |I|" if exp_abs else ""
+
     def proc_src(it):
-        return proc[it["idx"]]
+        v, i = proc[it["idx"]]
+        return v, (np.abs(i) if exp_abs else i)
 
     def plot_src(it):
-        return figure._series_xy(*proc[it["idx"]], use_abs, i_off)
+        return figure._series_xy(*proc[it["idx"]], use_abs or exp_abs, i_off)
 
     wb = Workbook()
 
@@ -631,10 +639,11 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
     x_dev = _write_xy_sheet(ws, items, raw_src)
 
     ws = wb.create_sheet("Processed")
-    _write_xy_sheet(ws, items, proc_src)
+    _write_xy_sheet(ws, items, proc_src, y_suffix=suffix)
 
     ws = wb.create_sheet("Plot")
-    _write_xy_sheet(ws, [it for it in items if it["visible"]], plot_src)
+    _write_xy_sheet(ws, [it for it in items if it["visible"]], plot_src,
+                    y_suffix=" |I|" if (use_abs or exp_abs) else "")
 
     # --- Metrics ---
     ws = wb.create_sheet("Metrics")
@@ -689,6 +698,8 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
         ("Dark 0V offset applied to Plot", bool(settings.get("dark_offset"))),
         ("Dark 0V offset value (A)", parsed.get("i_offset")),
         ("Post-processing (Processed·Plot)", postproc.describe(settings)),
+        ("Export as |I| (Processed·Plot)", exp_abs),
+        ("Raw sheet sign", "부호 유지 (항상)"),
         ("Metrics computed from", "Raw (후처리·오프셋 미적용)"),
         # X 를 공유시키면 그룹 대표 X 를 쓰므로, 스윕 간 실측 전압 차이가 있었다면 남긴다.
         ("Shared-X max deviation", x_dev or "0 (완전 일치)"),
@@ -746,6 +757,15 @@ def render_export(ctx) -> None:
     st.caption("현재 파일 하나를 내보냅니다. 여러 파일 한 번에는 우측 일괄 내보내기.")
 
     st.markdown("**데이터**")
+    # ⚠️ 엑셀을 만들기 **전에** 읽어야 같은 run 에 반영된다.
+    ctx.settings["export_abs"] = st.checkbox(
+        "전류를 절댓값 |I| 로 내보내기",
+        value=bool(ctx.settings.get("export_abs", True)),
+        key=state.wkey("export", "abs", fid=ctx.fid),
+        help="Origin 로그축에 바로 올리려면 양수여야 합니다. `Processed`·`Plot` 시트에 "
+             "적용되며, **`Raw` 시트는 언제나 부호를 유지**합니다 — 부호가 필요하면 "
+             "거기서 가져오세요.",
+    )
     try:
         xlsx = _excel_bytes(ctx, rows)
     except Exception as e:  # noqa: BLE001
