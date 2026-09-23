@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import plotly.graph_objects as go
 
-from pd_app import parsing, state
+from pd_app import parsing, postproc, state
 from pd_app.markup import apply_markup
 
 FIG_DPI = 96
@@ -60,28 +61,38 @@ def _clamp01(v):
 
 
 def _visible_traces(parsed, settings):
+    """표시할 트레이스. idx 는 parsed["traces"] 내 위치 — 후처리 결과와 짝을 맞추는 키."""
     out = []
     seen = {}
-    for t in parsed["traces"]:
+    for idx, t in enumerate(parsed["traces"]):
         label = t["label"]
         seen[label] = seen.get(label, 0) + 1
         tk = state.tkey_of(t, seen[label])
         ts = settings["traces"].get(tk)
         if ts is None or not ts.get("visible", True):
             continue
-        out.append((tk, ts, t["df"]))
+        out.append((idx, tk, ts, t["df"]))
     return out
 
 
-def _series(df, use_abs, i_offset=0.0):
-    """표시용 시리즈. `i_offset` 은 Dark 의 0V 영점(parsing._dark_zero_offset).
+def _series_xy(v, i, use_abs, i_offset=0.0):
+    """후처리까지 끝난 (V, I) 배열 → 실제로 그릴 (x, y).
 
-    광전류용 Range I 로 암전류를 함께 재면 암전류가 레인지 바닥에 깔려 0V 골짜기가
-    사라진다 → **그리기 직전에만** 빼서 복원한다. 성능지표는 raw 로 계산하므로
-    (summary.py) 이 보정은 지표에 영향을 주지 않는다.
+    `i_offset` 은 Dark 의 0V 영점(parsing._dark_zero_offset). 광전류용 Range I 로
+    암전류를 함께 재면 암전류가 레인지 바닥에 깔려 0V 골짜기가 사라진다 →
+    **그리기 직전에만** 뺀다. 성능지표는 raw 로 계산하므로(summary.py) 이 보정도,
+    postproc 의 이어붙이기·스무딩도 지표에는 영향을 주지 않는다.
     """
-    i = df["AnodeI"] - i_offset if i_offset else df["AnodeI"]
-    return df["AnodeV"], (i.abs() if use_abs else i)
+    i = np.asarray(i, dtype=float)
+    if i_offset:
+        i = i - i_offset
+    return np.asarray(v, dtype=float), (np.abs(i) if use_abs else i)
+
+
+def _series(df, use_abs, i_offset=0.0):
+    """후처리 없이 df 만으로 표시 시리즈를 만드는 단축형 (후처리를 거치지 않는 경로용)."""
+    return _series_xy(df["AnodeV"].to_numpy(dtype=float),
+                      df["AnodeI"].to_numpy(dtype=float), use_abs, i_offset)
 
 
 def _minor(dtick, scale):
@@ -165,8 +176,9 @@ def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
     xs, ys = [], []
     # 기본은 무보정. [서식] 탭에서 켰을 때만 Dark 0V 영점을 뺀다 (표시 전용).
     i_offset = float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0
-    for tk, ts, df in _visible_traces(parsed, settings):
-        x, y = _series(df, use_abs, i_offset)
+    proc = postproc.process(parsed, settings)   # 이어붙이기·스무딩 (표시 전용)
+    for idx, tk, ts, df in _visible_traces(parsed, settings):
+        x, y = _series_xy(*proc[idx], use_abs, i_offset)
         if is_log:
             zeros += int((y <= 0).sum())
         xs.append(x)

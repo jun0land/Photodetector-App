@@ -129,6 +129,16 @@ DEFAULTS = {
                    "text_raw": "", "font_size": 30},
     },
     "use_abs": True,
+    # 표시용 후처리 — **그래프 전용, 기본 전부 꺼짐** (postproc.py).
+    # SPEC.md 의 "Dark 병합 안 함" 결정을 기본값으로 지키고, 필요할 때만 켠다.
+    # 성능지표(R·D*)는 이 설정과 무관하게 항상 raw 로 계산한다.
+    "postproc": {
+        "stitch": False,     # 같은 라벨의 분할 측정(Dark 0→-1V / 0→+1V)을 이어 붙임
+        "smooth": "none",    # none | movavg | savgol
+        "window": 7,         # 창 크기(점 개수, 홀수)
+        "poly": 2,           # savgol 다항 차수
+        "targets": "all",    # all | light (Dark 제외)
+    },
     # Dark 0V 영점 보정 — **그래프 표시 전용, 기본 꺼짐**.
     # 암전류를 광전류용 Range I 로 함께 재면 레인지 분해능 바닥에 깔려 0V 골짜기가
     # 안 보인다. 필요할 때만 [서식] 탭에서 켠다. 성능지표(R·D*)는 이 값과 무관하게

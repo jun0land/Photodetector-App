@@ -15,9 +15,11 @@ ctx = SimpleNamespace(fid, settings, traces, parsed, fig_px, domains)
 
 from __future__ import annotations
 
+import copy
+
 import streamlit as st
 
-from pd_app import constants, state
+from pd_app import constants, postproc, state
 
 
 def _font_size(label, style, field, fid, help=None):
@@ -93,12 +95,9 @@ def _fonts(ctx):
         key=state.wkey("style", "show_markers", fid=fid),
     )
 
-    _dark_offset(ctx)
-
 
 def _dark_offset(ctx) -> None:
     """Dark 0V 영점 보정 토글 — 표시 전용, 기본 꺼짐, 현재 파일에만 적용."""
-    st.markdown("---")
     off = ctx.parsed.get("i_offset")
     ctx.settings["dark_offset"] = st.checkbox(
         "Dark 0V 영점 보정 (그래프 전용)",
@@ -151,10 +150,85 @@ def _geometry(ctx):
     )
 
 
+def _postproc(ctx) -> None:
+    """표시용 후처리 — 분할 측정 이어붙이기 + 스무딩. 전부 기본 꺼짐, 현재 파일에만 적용."""
+    fid = ctx.fid
+    p = ctx.settings.setdefault(
+        "postproc", copy.deepcopy(constants.DEFAULTS["postproc"]))
+
+    st.info("아래 항목은 **그래프 표시 전용**입니다. 성능지표(R·D\\*)는 어떤 설정이든 "
+            "항상 원본(raw)으로 계산됩니다.", icon="ℹ️")
+
+    _dark_offset(ctx)
+    st.markdown("---")
+
+    # --- 이어붙이기 ---
+    labels = [t["label"] for t in ctx.parsed["traces"]]
+    split = sorted({lb for lb in labels if labels.count(lb) > 1})
+    p["stitch"] = st.checkbox(
+        "분할 측정 이어붙이기",
+        value=bool(p.get("stitch", False)),
+        disabled=not split,
+        key=state.wkey("postproc", "stitch", fid=fid),
+        help="암전류를 0→-1V / 0→+1V 로 나눠 재면 두 스윕의 영점이 달라 접합부(0V)에 "
+             "단차가 생깁니다. 켜면 같은 라벨의 조각들을 접합부에서 평행이동해 이어 "
+             "붙입니다. 기울기는 건드리지 않고, 측정 순서상 첫 조각이 기준입니다.",
+    )
+    if not split:
+        st.caption("같은 라벨이 2개 이상인 트레이스가 없어 이어붙일 대상이 없습니다.")
+    else:
+        st.caption(f"대상: {', '.join(split)} — 각 라벨의 첫 조각을 기준으로 맞춥니다.")
+
+    st.markdown("---")
+
+    # --- 스무딩 ---
+    methods = list(postproc.SMOOTH_METHODS)
+    cur = p.get("smooth", "none")
+    p["smooth"] = st.selectbox(
+        "스무딩", methods,
+        index=methods.index(cur) if cur in methods else 0,
+        format_func=lambda k: postproc.SMOOTH_METHODS[k],
+        key=state.wkey("postproc", "smooth", fid=fid),
+        help="**Savitzky-Golay 를 권장합니다.** 창 안에서 다항식을 맞추므로 I-V 곡선처럼 "
+             "지수적으로 휘는 구간에서도 기울기를 지킵니다. 이동 평균은 단순한 대신 "
+             "휜 구간을 평평하게 끌어내려 오히려 원본보다 어긋날 수 있습니다.",
+    )
+    if p["smooth"] != "none":
+        c1, c2 = st.columns(2)
+        p["window"] = c1.number_input(
+            "창 크기 (점)", min_value=postproc.WINDOW_MIN, max_value=postproc.WINDOW_MAX,
+            value=int(p.get("window", 7)), step=2,
+            key=state.wkey("postproc", "window", fid=fid),
+            help="클수록 매끄럽지만 세부가 뭉개집니다. 짝수를 넣어도 홀수로 맞춥니다.",
+        )
+        if p["smooth"] == "savgol":
+            p["poly"] = c2.number_input(
+                "다항 차수", min_value=postproc.POLY_MIN, max_value=postproc.POLY_MAX,
+                value=int(p.get("poly", 2)), step=1,
+                key=state.wkey("postproc", "poly", fid=fid),
+                help="창 크기보다 작아야 합니다. 2~3 이 무난합니다.",
+            )
+        tgts = list(postproc.TARGETS)
+        cur_t = p.get("targets", "all")
+        p["targets"] = st.radio(
+            "적용 대상", tgts, horizontal=True,
+            index=tgts.index(cur_t) if cur_t in tgts else 0,
+            format_func=lambda k: postproc.TARGETS[k],
+            key=state.wkey("postproc", "targets", fid=fid),
+        )
+
+    st.markdown("---")
+    st.caption(f"현재 후처리: **{postproc.describe(ctx.settings)}**")
+    st.caption("엑셀 내보내기는 `Raw`(원본) · `Processed`(후처리 적용) · `Plot`(그래프 그대로) "
+               "시트로 나뉘어 저장됩니다.")
+
+
 def render(ctx) -> None:
     """서식 탭 렌더."""
-    tab_font, tab_geom = st.tabs(["폰트·선", "크기·배치"])
+    tab_font, tab_geom, tab_fix = st.tabs(["폰트·선", "크기·배치", "보정"])
     with tab_font:
         _fonts(ctx)
     with tab_geom:
         _geometry(ctx)
+    with tab_fix:
+        _postproc(ctx)

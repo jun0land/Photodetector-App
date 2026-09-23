@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from pd_app import constants, figure, state
+from pd_app import constants, figure, postproc, state
 
 _Q_ELECTRON = 1.602e-19  # C
 
@@ -512,6 +512,7 @@ def _export_traces(ctx) -> list[dict]:
         occ = seen[lb]
         ts = ctx.traces.get(state.tkey_of(t, occ)) or {}
         items.append({
+            "idx": idx,                      # postproc.process 결과와 짝 맞추는 키
             "name": lb if occ == 1 else f"{lb} #{occ}",
             "label": lb,
             "df": t["df"],
@@ -523,11 +524,12 @@ def _export_traces(ctx) -> list[dict]:
     return items
 
 
-def _write_xy_sheet(ws, items, *, transform=None) -> None:
+def _write_xy_sheet(ws, items, source) -> None:
     """트레이스별 (V, I) 열 쌍을 나란히 쓴다 — Origin 이 X/Y 로 바로 지정할 수 있는 배치.
 
     1행 = Long Name, 2행 = Units (Origin 의 헤더 관례). 3행부터 데이터.
     트레이스마다 점 개수가 달라도 각자 열이므로 문제 없다.
+    `source(item) -> (v, i)` 가 어떤 단계의 값을 쓸지 정한다.
     """
     from openpyxl.styles import Font, Alignment
     from openpyxl.utils import get_column_letter
@@ -536,12 +538,9 @@ def _write_xy_sheet(ws, items, *, transform=None) -> None:
     center = Alignment(horizontal="center")
     col = 1
     for it in items:
-        df = it["df"]
-        v = df["AnodeV"].to_numpy(dtype=float)
-        i = df["AnodeI"].to_numpy(dtype=float)
-        if transform is not None:
-            v, i = transform(df)
-            v = np.asarray(v, dtype=float); i = np.asarray(i, dtype=float)
+        v, i = source(it)
+        v = np.asarray(v, dtype=float)
+        i = np.asarray(i, dtype=float)
 
         for j, (title, unit, arr) in enumerate(((f"{it['name']} V", "V", v),
                                                 (f"{it['name']} I", "A", i))):
@@ -558,10 +557,11 @@ def _write_xy_sheet(ws, items, *, transform=None) -> None:
 def _excel_bytes(ctx, metric_rows) -> bytes:
     """Origin 에서 바로 열어 편집할 수 있는 .xlsx.
 
-    Plot    그래프에 그려진 값 그대로 (숨긴 트레이스 제외, 로그축이면 |I|, 보정 켜졌으면 차감)
-    Raw     원본 AnodeV / AnodeI 전 트레이스 (부호·오프셋 무보정)
-    Metrics 성능지표 표 + 데이터셋 붙여넣기 블록
-    Info    파일·샘플·측정 조건·Range I
+    Raw        원본 AnodeV / AnodeI 전 트레이스 (후처리·오프셋 전혀 없음, 부호 유지)
+    Processed  후처리(이어붙이기·스무딩) 적용, 부호 유지 — 후처리가 꺼져 있으면 Raw 와 동일
+    Plot       그래프에 그려진 값 그대로 (Processed + 0V 오프셋 + 로그축이면 |I|, 숨긴 것 제외)
+    Metrics    성능지표 표 + 데이터셋 붙여넣기 블록  ※ 지표는 **항상 Raw** 기준
+    Info       파일·샘플·측정 조건·후처리 설정·Range I
     """
     from openpyxl import Workbook
     from openpyxl.styles import Font
@@ -575,17 +575,28 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
     is_log = settings["axes"]["y"].get("type", "log") == "log"
     use_abs = True if is_log else bool(settings.get("use_abs", False))
     i_off = float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0
+    proc = postproc.process(parsed, settings)
 
-    def plot_xf(df):
-        return figure._series(df, use_abs, i_off)
+    def raw_src(it):
+        df = it["df"]
+        return df["AnodeV"].to_numpy(dtype=float), df["AnodeI"].to_numpy(dtype=float)
+
+    def proc_src(it):
+        return proc[it["idx"]]
+
+    def plot_src(it):
+        return figure._series_xy(*proc[it["idx"]], use_abs, i_off)
 
     wb = Workbook()
 
-    ws = wb.active; ws.title = "Plot"
-    _write_xy_sheet(ws, [it for it in items if it["visible"]], transform=plot_xf)
+    ws = wb.active; ws.title = "Raw"
+    _write_xy_sheet(ws, items, raw_src)
 
-    ws = wb.create_sheet("Raw")
-    _write_xy_sheet(ws, items)
+    ws = wb.create_sheet("Processed")
+    _write_xy_sheet(ws, items, proc_src)
+
+    ws = wb.create_sheet("Plot")
+    _write_xy_sheet(ws, [it for it in items if it["visible"]], plot_src)
 
     # --- Metrics ---
     ws = wb.create_sheet("Metrics")
@@ -639,6 +650,8 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
         ("Y axis", "log |I|" if is_log else "linear"),
         ("Dark 0V offset applied to Plot", bool(settings.get("dark_offset"))),
         ("Dark 0V offset value (A)", parsed.get("i_offset")),
+        ("Post-processing (Processed·Plot)", postproc.describe(settings)),
+        ("Metrics computed from", "Raw (후처리·오프셋 미적용)"),
     ]
     for r, (k, v) in enumerate(info, start=1):
         ws.cell(row=r, column=1, value=k).font = bold
