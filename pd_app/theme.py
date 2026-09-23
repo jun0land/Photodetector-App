@@ -652,59 +652,85 @@ def unload_guard(enabled: bool) -> None:
 # V2(PLAN §0): st.html(unsafe_allow_javascript=True) 는 **메인 문서에서** 실행되고
 # window.Plotly 도 노출되므로 iframe 우회가 필요 없다.
 _PEEK_JS = """
-<button id="pd-peek-btn" type="button">👁 원본 보기 — 누르고 있기</button>
+<button id="pd-peek-btn" type="button" title="누르고 있는 동안 보정 전 원본이 보입니다">👁 원본 보기</button>
 <script>
 (function () {
   var doc = document;
   // rerun 마다 figure 가 바뀌므로 오버레이는 지우고 다시 만든다.
   var old = doc.getElementById('pd-peek-overlay');
   if (old) { try { if (window.Plotly) Plotly.purge(old); } catch (e) {} old.remove(); }
+  var oldBadge = doc.querySelector('.pd-peek-badge');
+  if (oldBadge) oldBadge.remove();
 
   var btn = doc.getElementById('pd-peek-btn');
   if (!btn) return;
-  btn.style.cssText = 'width:100%;height:34px;margin:0;border-radius:.5rem;cursor:pointer;'
+  // 내용 폭에 맞춘 작은 버튼 (width:100% 면 컬럼 전체를 쓸데없이 차지한다)
+  btn.style.cssText = 'display:inline-block;width:auto;height:26px;padding:0 9px;margin:0;'
+    + 'border-radius:.4rem;cursor:pointer;white-space:nowrap;line-height:24px;'
     + 'border:1px solid rgba(49,51,63,.2);background:#fff;color:rgb(49,51,63);'
-    + 'font-size:13px;user-select:none;-webkit-user-select:none;touch-action:none;'
+    + 'font-size:12px;user-select:none;-webkit-user-select:none;touch-action:none;'
     + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
 
-  var host = doc.querySelector('[data-testid="stPlotlyChart"]');
-  if (!host || typeof Plotly === 'undefined') {
-    btn.disabled = true;
-    btn.textContent = '원본 보기 (그래프를 찾지 못했습니다)';
-    return;
-  }
-
-  var w = host.clientWidth, h = host.clientHeight;
-  if (!w || !h) { btn.disabled = true; return; }
-
-  host.style.position = 'relative';
-  var ov = doc.createElement('div');
-  ov.id = 'pd-peek-overlay';
-  // display:none 이면 Plotly 가 크기를 0 으로 잡는다 → 보이되 투명하게 두고
-  // pointer-events:none 으로 아래 차트의 hover 를 막지 않는다.
-  ov.style.cssText = 'position:absolute;left:0;top:0;opacity:0;pointer-events:none;'
-    + 'z-index:5;background:#fff;transition:opacity .06s linear;';
-  ov.style.width = w + 'px';
-  ov.style.height = h + 'px';
-  host.appendChild(ov);
-
   var fig = __PD_RAW_FIG__;
-  Plotly.newPlot(ov, fig.data, fig.layout,
-                 {staticPlot: true, displayModeBar: false, responsive: false});
+  var LABEL = '👁 원본 보기';
 
-  var on = function (e) { if (e) e.preventDefault(); ov.style.opacity = '1';
-                          btn.style.borderColor = '#ed542b'; btn.style.color = '#ed542b'; };
-  var off = function () { ov.style.opacity = '0';
-                          btn.style.borderColor = 'rgba(49,51,63,.2)';
-                          btn.style.color = 'rgb(49,51,63)'; };
-  btn.addEventListener('mousedown', on);
-  btn.addEventListener('touchstart', on, {passive: false});
-  btn.addEventListener('mouseleave', off);
-  // 버튼 밖에서 손을 떼도 반드시 돌아오게 한다.
-  window.addEventListener('mouseup', off);
-  window.addEventListener('touchend', off);
-  window.addEventListener('touchcancel', off);
-  window.addEventListener('blur', off);
+  // 차트가 아직 배치 전이면 clientWidth 가 0 이다. 한 번 보고 포기하지 말고
+  // 몇 프레임 기다린다 — 예전엔 여기서 버튼을 조용히 비활성화해 버렸다.
+  var tries = 0;
+  (function setup() {
+    var host = doc.querySelector('[data-testid="stPlotlyChart"]');
+    var w = host ? host.clientWidth : 0;
+    var h = host ? host.clientHeight : 0;
+    if (typeof Plotly === 'undefined' || !host || !w || !h) {
+      if (++tries < 40) { requestAnimationFrame(setup); return; }
+      btn.disabled = true;
+      btn.textContent = '원본 보기 (그래프를 찾지 못했습니다)';
+      return;
+    }
+
+    host.style.position = 'relative';
+    var ov = doc.createElement('div');
+    ov.id = 'pd-peek-overlay';
+    // display:none 이면 Plotly 가 크기를 0 으로 잡는다 → 보이되 투명하게 두고
+    // pointer-events:none 으로 아래 차트의 hover 를 막지 않는다.
+    ov.style.cssText = 'position:absolute;left:0;top:0;opacity:0;pointer-events:none;'
+      + 'z-index:5;background:#fff;transition:opacity .06s linear;';
+    ov.style.width = w + 'px';
+    ov.style.height = h + 'px';
+    host.appendChild(ov);
+
+    Plotly.newPlot(ov, fig.data, fig.layout,
+                   {staticPlot: true, displayModeBar: false, responsive: false});
+
+    // 보정량이 작으면 곡선만 봐서는 바뀐 줄 모른다 → 배지로 상태를 분명히 한다.
+    var badge = doc.createElement('div');
+    badge.className = 'pd-peek-badge';
+    badge.textContent = '원본 (보정 전)';
+    badge.style.cssText = 'position:absolute;left:8px;top:8px;z-index:6;padding:2px 8px;'
+      + 'border-radius:10px;background:#ed542b;color:#fff;font-size:11px;font-weight:600;'
+      + 'pointer-events:none;opacity:0;transition:opacity .06s linear;';
+    host.appendChild(badge);
+
+    var on = function (e) {
+      if (e) e.preventDefault();
+      ov.style.opacity = '1'; badge.style.opacity = '1';
+      btn.textContent = '원본 표시 중';
+      btn.style.borderColor = '#ed542b'; btn.style.color = '#ed542b';
+    };
+    var off = function () {
+      ov.style.opacity = '0'; badge.style.opacity = '0';
+      btn.textContent = LABEL;
+      btn.style.borderColor = 'rgba(49,51,63,.2)'; btn.style.color = 'rgb(49,51,63)';
+    };
+    btn.addEventListener('mousedown', on);
+    btn.addEventListener('touchstart', on, {passive: false});
+    btn.addEventListener('mouseleave', off);
+    // 버튼 밖에서 손을 떼도 반드시 돌아오게 한다.
+    window.addEventListener('mouseup', off);
+    window.addEventListener('touchend', off);
+    window.addEventListener('touchcancel', off);
+    window.addEventListener('blur', off);
+  })();
 })();
 </script>
 """
