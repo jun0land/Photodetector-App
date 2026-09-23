@@ -283,6 +283,21 @@ def _postproc(ctx) -> None:
             format_func=lambda k: postproc.TARGETS[k],
             key=state.wkey("postproc", "targets", fid=fid),
         )
+        p["split_sign"] = st.checkbox(
+            "전류 부호가 바뀌는 지점은 넘어가지 않기",
+            value=bool(p.get("split_sign", True)),
+            key=state.wkey("postproc", "split_sign", fid=fid),
+            help="0 교차점 부근은 |I| 가 수십 배로 급변합니다. 창 안에서 부호가 다른 값을 "
+                 "함께 평균하면 **로그축 골짜기가 메워지고 교차점도 밀립니다** "
+                 "(실측: 골짜기가 최대 3.4배 얕아지고 교차점이 12.5mV 이동). "
+                 "켜면 부호가 같은 구간끼리만 평활해 깊이·위치가 그대로 유지됩니다.",
+        )
+        if p["split_sign"]:
+            segs = max((len(postproc._sign_segments(
+                t["df"]["AnodeI"].to_numpy(dtype=float)))
+                for t in ctx.parsed["traces"]), default=1)
+            st.caption(f"트레이스당 최대 {segs}개 구간으로 나눠 평활합니다 "
+                       "(3점 미만 구간은 원본 유지).")
 
     st.markdown("---")
     st.caption(f"현재 후처리: **{postproc.describe(ctx.settings)}**")

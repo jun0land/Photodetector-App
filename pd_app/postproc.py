@@ -78,6 +78,7 @@ def cfg(settings) -> dict:
     except (TypeError, ValueError):
         right = 0.15
     return {
+        "split_sign": bool(p.get("split_sign", True)),
         "stitch": bool(p.get("stitch", False)),
         "stitch_mode": mode,
         "stitch_span": min(max(span, SPAN_MIN), SPAN_MAX),
@@ -108,8 +109,9 @@ def describe(settings) -> str:
         parts.append(f"이어붙이기·{tag}")
     if c["smooth"] != "none":
         extra = f"·{c['poly']}차" if c["smooth"] == "savgol" else ""
+        guard = "" if c["split_sign"] else ", 부호전환 무시"
         parts.append(f"{SMOOTH_METHODS[c['smooth']]}(창 {c['window']}{extra}, "
-                     f"{TARGETS[c['targets']]})")
+                     f"{TARGETS[c['targets']]}{guard})")
     return " · ".join(parts) if parts else "없음"
 
 
@@ -153,6 +155,38 @@ def _smooth(y: np.ndarray, method: str, window: int, poly: int) -> np.ndarray:
     pad = np.pad(y, half, mode="reflect", reflect_type="odd")
     # c 는 대칭이지만 상관(correlation) 이 맞으므로 뒤집어 넣는다.
     return np.convolve(pad, c[::-1], mode="valid")
+
+
+def _sign_segments(y: np.ndarray) -> list[tuple[int, int]]:
+    """부호가 같은 연속 구간 [start, end) 목록. 0 은 앞 구간에 붙인다."""
+    s = np.sign(y)
+    s[s == 0] = 1
+    edges = np.flatnonzero(s[:-1] != s[1:]) + 1
+    bounds = [0, *edges.tolist(), len(y)]
+    return list(zip(bounds, bounds[1:]))
+
+
+def _smooth_guarded(y: np.ndarray, method: str, window: int, poly: int,
+                    split_sign: bool) -> np.ndarray:
+    """부호 전환점을 가로지르지 않도록 구간을 나눠 평활한다.
+
+    0 교차점 부근은 |I| 가 수십 배로 급변하는데, 창 안에서 부호가 다른 값들을 함께
+    평균하면 **로그축의 골짜기가 메워진다.** 실측(savgol 창11): 740nm 골짜기 깊이가
+    3.03e-11 → 1.04e-10 으로 3.4배(0.53 decade) 얕아졌고, 교차점도 미세하게 밀렸다.
+    부호가 같은 구간끼리만 평활하면 깊이·위치가 그대로 유지된다(실측 1.0배).
+
+    구간이 3점 미만이면 평활하지 않고 원본을 둔다 — 교차점 바로 옆은 손대지 않는
+    편이 안전하다.
+    """
+    if method == "none":
+        return y
+    if not split_sign:
+        return _smooth(y, method, window, poly)
+    out = y.copy()
+    for a, b in _sign_segments(y):
+        if b - a >= 3:
+            out[a:b] = _smooth(y[a:b].copy(), method, window, poly)
+    return out
 
 
 # ---------------- 이어붙이기 ----------------
@@ -382,7 +416,8 @@ def process(parsed, settings) -> list[tuple[np.ndarray, np.ndarray]]:
         for k, t in enumerate(traces):
             if c["targets"] == "light" and t["label"] == "Dark":
                 continue
-            out[k][1] = _smooth(out[k][1], c["smooth"], c["window"], c["poly"])
+            out[k][1] = _smooth_guarded(out[k][1], c["smooth"], c["window"],
+                                        c["poly"], c["split_sign"])
 
     if c["stitch"]:
         by_label: dict[str, list[int]] = {}
