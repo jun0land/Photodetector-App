@@ -22,6 +22,11 @@ _Q_ELECTRON = 1.602e-19  # C
 # parsing._parse_exported() 가 같은 이름을 찾는다 — 바꾸면 양쪽을 같이 바꿀 것.
 _SETTINGS_KEY = "Settings (JSON) — 다시 불러오기용"
 
+# 시트 이름. 영문 앞부분은 그대로 둬야 다시 불러오기(parsing._parse_exported)가 찾는다.
+SHEET_RAW = "Raw (원본)"
+SHEET_PROCESSED = "Processed (보정본)"
+SHEET_PLOT = "Plot (화면 그대로)"
+
 
 # ---------------- 데이터 요약 ----------------
 def _range_i_warning(parsed) -> None:
@@ -599,11 +604,14 @@ def _write_xy_sheet(ws, items, source, *, y_suffix: str = "") -> str:
 def _excel_bytes(ctx, metric_rows) -> bytes:
     """Origin 에서 바로 열어 편집할 수 있는 .xlsx.
 
-    Raw        원본 AnodeV / AnodeI 전 트레이스 (후처리·오프셋 전혀 없음, **항상 부호 유지**)
-    Processed  후처리(이어붙이기·스무딩) 적용 — 기본은 |I| (export_abs)
-    Plot       그래프에 그려진 값 그대로 (Processed + 0V 오프셋 + |I|, 숨긴 것 제외)
-    Metrics    성능지표 표 + 데이터셋 붙여넣기 블록  ※ 지표는 **항상 Raw** 기준
-    Info       파일·샘플·측정 조건·후처리 설정·Range I
+    Raw (원본)          측정 원본. 보정·오프셋 전혀 없고 전류 부호도 유지.
+    Processed (보정본)   이어붙이기·스무딩 적용, 전 트레이스. Origin 재작도용.
+    Plot (화면 그대로)   앱 화면 그대로. Processed 와 딱 두 가지만 다르다 —
+                        ① Dark 0V 영점 보정이 켜져 있으면 그만큼 뺀 값
+                        ② 숨긴 트레이스는 빠짐
+                        둘 다 아니면 Processed 와 완전히 같다 (기본 설정이 그렇다).
+    Metrics            성능지표 표 + 붙여넣기 블록  ※ 지표는 **항상 Raw** 기준
+    Info               시트 안내 + 측정 조건·후처리 설정·Range I
 
     Origin 로그축에 바로 올릴 수 있도록 Processed·Plot 은 기본이 |I| 다. Raw 만은
     부호를 지킨다 — 부호가 필요하면 Raw 에서 가져오면 된다.
@@ -639,13 +647,15 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
 
     wb = Workbook()
 
-    ws = wb.active; ws.title = "Raw"
+    hidden = [it["name"] for it in items if not it["visible"]]
+
+    ws = wb.active; ws.title = SHEET_RAW
     x_dev = _write_xy_sheet(ws, items, raw_src)
 
-    ws = wb.create_sheet("Processed")
+    ws = wb.create_sheet(SHEET_PROCESSED)
     _write_xy_sheet(ws, items, proc_src, y_suffix=suffix)
 
-    ws = wb.create_sheet("Plot")
+    ws = wb.create_sheet(SHEET_PLOT)
     _write_xy_sheet(ws, [it for it in items if it["visible"]], plot_src,
                     y_suffix=" |I|" if (use_abs or exp_abs) else "")
 
@@ -690,6 +700,37 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
     # --- Info ---
     ws = wb.create_sheet("Info")
     f = state.S()["files"].get(ctx.fid) or {}
+
+    # 시트 안내 — Processed 와 Plot 이 뭐가 다른지 파일만 보고 알 수 있게 적는다.
+    # 기본 설정(오프셋 끔·숨긴 트레이스 없음)에서는 둘이 완전히 같으므로 그것도 밝힌다.
+    diff = []
+    if i_off:
+        diff.append(f"Dark 0V 영점 {i_off:+.3e} A 를 뺌")
+    if hidden:
+        diff.append(f"숨긴 트레이스 제외({', '.join(hidden)})")
+    plot_note = ("Processed 와 " + " · ".join(diff) + " 만 다름") if diff else \
+                "지금 설정에서는 Processed 와 **완전히 동일**"
+    guide = [
+        ("■ 시트 안내", ""),
+        (SHEET_RAW, "측정 원본 그대로. 보정·오프셋 전혀 없고 전류 부호도 유지. "
+                    "원본이 필요하면 여기서 가져오세요."),
+        (SHEET_PROCESSED, "보정(이어붙이기·스무딩)을 적용한 값, 전 트레이스. "
+                          "Origin 에서 다시 그릴 때 보통 이 시트를 씁니다."),
+        (SHEET_PLOT, "앱 화면에 그려진 그대로. " + plot_note),
+        ("Metrics", "성능지표(R·D*) 표 + 데이터셋 붙여넣기 블록. "
+                    "지표는 보정과 무관하게 **항상 Raw** 로 계산합니다."),
+        ("", ""),
+        ("■ 측정·설정", ""),
+    ]
+    for r, (k, v) in enumerate(guide, start=1):
+        c = ws.cell(row=r, column=1, value=k)
+        if k.startswith("■"):
+            c.font = Font(bold=True)
+        elif k:
+            c.font = Font(bold=True)
+        ws.cell(row=r, column=2, value=v)
+    base_row = len(guide)
+
     info = [
         ("File", f.get("name", "")),
         ("Sample", settings["insets"]["sample"].get("text_raw", "")),
@@ -721,10 +762,10 @@ def _excel_bytes(ctx, metric_rows) -> bytes:
             "range_i": {it["name"]: it["range_i"] for it in items},
         }, ensure_ascii=False)),
     ]
-    for r, (k, v) in enumerate(info, start=1):
+    for r, (k, v) in enumerate(info, start=base_row + 1):
         ws.cell(row=r, column=1, value=k).font = bold
         ws.cell(row=r, column=2, value=v)
-    r = len(info) + 2
+    r = base_row + len(info) + 2
     ws.cell(row=r, column=1, value="E_e per wavelength (mW/cm2)").font = bold
     for lb in _sorted_wavelengths(m["irradiance"].keys()):
         r += 1

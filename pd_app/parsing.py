@@ -112,8 +112,15 @@ _EXPORT_SETTINGS_KEY = "Settings (JSON)"   # summary._SETTINGS_KEY 의 접두사
 
 
 def _sheet_raw(file_bytes, sheets, engine, name):
-    """시트를 header=None 으로 다시 읽는다 (헤더 2줄이 데이터가 아니라 이름·단위라서)."""
-    key = next((k for k in sheets if str(k).strip().lower() == name.lower()), None)
+    """시트를 header=None 으로 다시 읽는다 (헤더 2줄이 데이터가 아니라 이름·단위라서).
+
+    시트 이름은 'Raw (원본)' 처럼 뒤에 한글 설명이 붙을 수 있으므로 **앞부분만** 맞춘다
+    (구버전 'Raw' 와 신버전 'Raw (원본)' 을 같이 읽기 위함).
+    """
+    low = name.lower()
+    key = next((k for k in sheets if str(k).strip().lower() == low), None)
+    if key is None:
+        key = next((k for k in sheets if str(k).strip().lower().startswith(low)), None)
     if key is None:
         return None
     try:
