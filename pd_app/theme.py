@@ -643,6 +643,83 @@ def unload_guard(enabled: bool) -> None:
             unsafe_allow_javascript=True)
 
 
+# 원본 보기 — 버튼을 **누르고 있는 동안만** 보정 전 그래프를 겹쳐 보여준다.
+#
+# Streamlit 버튼은 누를 때마다 rerun(서버 왕복)이라 "누르고 있기" 에 못 쓴다. 그래서
+# 원본 figure 를 미리 차트 위에 투명 오버레이로 깔아 두고, mousedown/up 에 불투명도만
+# 바꾼다 — 서버 왕복이 없어 즉시 전환된다.
+#
+# V2(PLAN §0): st.html(unsafe_allow_javascript=True) 는 **메인 문서에서** 실행되고
+# window.Plotly 도 노출되므로 iframe 우회가 필요 없다.
+_PEEK_JS = """
+<button id="pd-peek-btn" type="button">👁 원본 보기 — 누르고 있기</button>
+<script>
+(function () {
+  var doc = document;
+  // rerun 마다 figure 가 바뀌므로 오버레이는 지우고 다시 만든다.
+  var old = doc.getElementById('pd-peek-overlay');
+  if (old) { try { if (window.Plotly) Plotly.purge(old); } catch (e) {} old.remove(); }
+
+  var btn = doc.getElementById('pd-peek-btn');
+  if (!btn) return;
+  btn.style.cssText = 'width:100%;height:34px;margin:0;border-radius:.5rem;cursor:pointer;'
+    + 'border:1px solid rgba(49,51,63,.2);background:#fff;color:rgb(49,51,63);'
+    + 'font-size:13px;user-select:none;-webkit-user-select:none;touch-action:none;'
+    + "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;";
+
+  var host = doc.querySelector('[data-testid="stPlotlyChart"]');
+  if (!host || typeof Plotly === 'undefined') {
+    btn.disabled = true;
+    btn.textContent = '원본 보기 (그래프를 찾지 못했습니다)';
+    return;
+  }
+
+  var w = host.clientWidth, h = host.clientHeight;
+  if (!w || !h) { btn.disabled = true; return; }
+
+  host.style.position = 'relative';
+  var ov = doc.createElement('div');
+  ov.id = 'pd-peek-overlay';
+  // display:none 이면 Plotly 가 크기를 0 으로 잡는다 → 보이되 투명하게 두고
+  // pointer-events:none 으로 아래 차트의 hover 를 막지 않는다.
+  ov.style.cssText = 'position:absolute;left:0;top:0;opacity:0;pointer-events:none;'
+    + 'z-index:5;background:#fff;transition:opacity .06s linear;';
+  ov.style.width = w + 'px';
+  ov.style.height = h + 'px';
+  host.appendChild(ov);
+
+  var fig = __PD_RAW_FIG__;
+  Plotly.newPlot(ov, fig.data, fig.layout,
+                 {staticPlot: true, displayModeBar: false, responsive: false});
+
+  var on = function (e) { if (e) e.preventDefault(); ov.style.opacity = '1';
+                          btn.style.borderColor = '#ed542b'; btn.style.color = '#ed542b'; };
+  var off = function () { ov.style.opacity = '0';
+                          btn.style.borderColor = 'rgba(49,51,63,.2)';
+                          btn.style.color = 'rgb(49,51,63)'; };
+  btn.addEventListener('mousedown', on);
+  btn.addEventListener('touchstart', on, {passive: false});
+  btn.addEventListener('mouseleave', off);
+  // 버튼 밖에서 손을 떼도 반드시 돌아오게 한다.
+  window.addEventListener('mouseup', off);
+  window.addEventListener('touchend', off);
+  window.addEventListener('touchcancel', off);
+  window.addEventListener('blur', off);
+})();
+</script>
+"""
+
+
+def raw_peek(fig_json: str) -> None:
+    """차트 위에 원본 figure 오버레이 + '누르고 있기' 버튼을 설치한다.
+
+    `fig_json` 은 `figure.build_figure(..., raw=True).to_json()` 결과여야 한다.
+    보정이 하나도 안 켜져 있으면 비교할 게 없으므로 호출하지 않는 것이 맞다.
+    """
+    st.html(_PEEK_JS.replace("__PD_RAW_FIG__", fig_json),
+            unsafe_allow_javascript=True)
+
+
 def fig_metrics(w_px: int, h_px: int) -> None:
     """figure 의 **고유** 픽셀 크기를 CSS 변수로 알린다. 매 run 호출 (layout 이 호출).
 

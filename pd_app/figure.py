@@ -145,7 +145,12 @@ def _y_range(ys, ax, is_log):
     return [float(lo), float(hi)]
 
 
-def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
+def build_figure(fid, *, px_scale: float = 1.0, raw: bool = False) -> go.Figure:
+    """`raw=True` 면 표시용 보정을 전부 끄고 원본만 그린다 (원본 보기 오버레이용).
+
+    축·색·폰트 등 서식은 그대로 두고 **데이터 변형만** 되돌린다 — 그래야 보정 전후를
+    같은 자리에서 겹쳐 비교할 수 있다.
+    """
     s = state.S()
     settings = state.file_settings(fid)
     if settings is None:
@@ -175,8 +180,11 @@ def build_figure(fid, *, px_scale: float = 1.0) -> go.Figure:
     zeros = 0
     xs, ys = [], []
     # 기본은 무보정. [서식] 탭에서 켰을 때만 Dark 0V 영점을 뺀다 (표시 전용).
-    i_offset = float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0
-    proc = postproc.process(parsed, settings)   # 이어붙이기·스무딩 (표시 전용)
+    i_offset = 0.0 if raw else (
+        float(parsed.get("i_offset") or 0.0) if settings.get("dark_offset") else 0.0)
+    proc = ([(t["df"]["AnodeV"].to_numpy(dtype=float),
+              t["df"]["AnodeI"].to_numpy(dtype=float)) for t in parsed["traces"]]
+            if raw else postproc.process(parsed, settings))   # 이어붙이기·스무딩 (표시 전용)
     for idx, tk, ts, df in _visible_traces(parsed, settings):
         x, y = _series_xy(*proc[idx], use_abs, i_offset)
         if is_log:

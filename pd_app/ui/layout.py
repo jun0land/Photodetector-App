@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import streamlit as st
 
-from pd_app import figure, parsing, state, theme
+from pd_app import figure, parsing, postproc, state, theme
 from pd_app.ui import (
     panel_axes,
     panel_inset,
@@ -277,6 +277,16 @@ def _graph_stage(ctx, s: float) -> None:
     zeros = figure.zero_count(fig)
     if zeros > 0:
         st.caption(f"로그 스케일이라 0 이하인 점 {zeros}개는 표시에서 제외되었습니다.")
+
+    # 보정이 켜져 있을 때만 '원본 보기'. 꺼져 있으면 비교할 게 없다.
+    if postproc.enabled(ctx.settings) or ctx.settings.get("dark_offset"):
+        try:
+            raw_fig = figure.build_figure(fid, px_scale=s, raw=True)
+            theme.raw_peek(raw_fig.to_json().replace("</script>", "<\\/script>"))
+            st.caption(f"현재 보정: {postproc.describe(ctx.settings)}"
+                       + (" · Dark 0V 영점" if ctx.settings.get("dark_offset") else ""))
+        except Exception:  # noqa: BLE001 — 원본 보기는 보조 기능이라 그래프를 막지 않는다
+            pass
 
     with st.expander("성능 지표", expanded=False):
         summary.render_metrics(ctx)
