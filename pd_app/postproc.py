@@ -25,8 +25,13 @@ SMOOTH_METHODS = {
 }
 TARGETS = {"all": "전체", "light": "광 트레이스만"}
 
-# 접합부를 어떻게 이을지. 아래로 갈수록 보기엔 매끄럽지만 원본에서 멀어진다.
+# 접합부를 어떻게 이을지.
+#
+# ⚠️ shift·blend 는 조각 하나를 통째로 옮기므로 **그 조각의 0 교차점(골짜기)도 같이
+#    밀린다.** 실측: 14s_1 Dark 골짜기가 +0.65V → +0.99V 로 이동하고 깊이도 29배
+#    얕아졌다. 암전류 골짜기를 0V 에 두려면 zero 를 쓸 것.
 STITCH_MODES = {
+    "zero": "영점 정렬 (0V를 0으로)",
     "shift": "평행이동 (전체)",
     "taper": "테이퍼 (접합부만)",
     "blend": "블렌드 (기울기까지)",
@@ -34,7 +39,7 @@ STITCH_MODES = {
 
 WINDOW_MIN, WINDOW_MAX = 3, 51
 POLY_MIN, POLY_MAX = 1, 5
-SPAN_MIN, SPAN_MAX = 0.005, 0.5
+SPAN_MIN, SPAN_MAX = 0.005, 1.0
 
 
 def cfg(settings) -> dict:
@@ -54,13 +59,13 @@ def cfg(settings) -> dict:
         poly = int(p.get("poly", 2))
     except (TypeError, ValueError):
         poly = 2
-    mode = p.get("stitch_mode", "shift")
+    mode = p.get("stitch_mode", "zero")
     if mode not in STITCH_MODES:
-        mode = "shift"
+        mode = "zero"
     try:
-        span = float(p.get("stitch_span", 0.05))
+        span = float(p.get("stitch_span", 0.5))
     except (TypeError, ValueError):
-        span = 0.05
+        span = 0.5
     return {
         "stitch": bool(p.get("stitch", False)),
         "stitch_mode": mode,
@@ -206,6 +211,24 @@ def _blend_junction(out, k1: int, k2: int, x: float, span: float) -> None:
         out[k][1] = i
 
 
+def _zero_anchor(out, ks: list[int]) -> None:
+    """각 조각에서 **자기 0V 값**을 빼 모두 0V 에서 0 이 되게 한다.
+
+    0 바이어스에서 암전류는 0 이어야 하고 측정된 값은 조각마다 다른 계측 오프셋이다.
+    조각별로 자기 오프셋을 빼면 단차가 사라지면서 **골짜기가 양쪽 모두 정확히 0V 에
+    선다** — 한쪽을 통째로 옮기는 shift 와 달리 0 교차점이 밀리지 않는다.
+
+    ⚠️ 암전류 전용이다. 광 트레이스에 쓰면 0V 광전류(광기전 성분)까지 지워진다.
+    조각들이 0V 를 품지 않으면 전체 구간 중점을 기준으로 삼는다.
+    """
+    lo = min(float(out[k][0].min()) for k in ks)
+    hi = max(float(out[k][0].max()) for k in ks)
+    x = 0.0 if lo <= 0.0 <= hi else 0.5 * (lo + hi)
+    for k in ks:
+        v, i = out[k]
+        out[k][1] = i - _value_near(v, i, x)
+
+
 def _stitch_group(out, ks: list[int], mode: str, span: float) -> None:
     """같은 라벨의 조각들을 전압 순으로 사슬처럼 이어 붙인다.
 
@@ -226,6 +249,39 @@ def _stitch_group(out, ks: list[int], mode: str, span: float) -> None:
 
 
 # ---------------- 진입점 ----------------
+def taper_slope_ratio(parsed, span: float) -> float | None:
+    """테이퍼가 접합부에 **더하는** 기울기가 데이터 자체 기울기의 몇 배인지.
+
+    이 값이 1 근처면 테이퍼 구간이 급하게 꺾여 어색해 보인다 (실측: span 0.05V 에서
+    124~132%). 0.2 이하로 내려가도록 span 을 넓히면 자연스러워진다. UI 가 이 값을
+    보여줘 사용자가 span 을 감으로 찍지 않게 한다.
+    """
+    by: dict[str, list[int]] = {}
+    for k, t in enumerate(parsed["traces"]):
+        by.setdefault(t["label"], []).append(k)
+    worst = None
+    for ks in by.values():
+        if len(ks) < 2:
+            continue
+        arrs = [(parsed["traces"][k]["df"]["AnodeV"].to_numpy(dtype=float),
+                 parsed["traces"][k]["df"]["AnodeI"].to_numpy(dtype=float)) for k in ks]
+        order = sorted(range(len(ks)), key=lambda j: 0.5 * (arrs[j][0].min() + arrs[j][0].max()))
+        for a, b in zip(order, order[1:]):
+            (v1, i1), (v2, i2) = arrs[a], arrs[b]
+            x = _junction(v1, v2)
+            delta = abs(_value_near(v1, i1, x) - _value_near(v2, i2, x))
+            o = np.argsort(v2)
+            vs, iv = v2[o], i2[o]
+            n = min(8, len(vs))
+            if n < 2:
+                continue
+            own = abs(float(np.polyfit(vs[:n], iv[:n], 1)[0]))
+            if own > 0:
+                r = (delta / max(span, 1e-12)) / own
+                worst = r if worst is None else max(worst, r)
+    return worst
+
+
 def process(parsed, settings) -> list[tuple[np.ndarray, np.ndarray]]:
     """parsed["traces"] 와 **같은 순서·길이**로 후처리된 (V, I) 배열을 돌려준다.
 
@@ -252,8 +308,17 @@ def process(parsed, settings) -> list[tuple[np.ndarray, np.ndarray]]:
         by_label: dict[str, list[int]] = {}
         for k, t in enumerate(traces):
             by_label.setdefault(t["label"], []).append(k)
-        for ks in by_label.values():
-            if len(ks) >= 2:
+        for label, ks in by_label.items():
+            if len(ks) < 2:
+                continue
+            if c["stitch_mode"] == "zero":
+                # 영점 정렬은 암전류에만 물리적 근거가 있다. 광 트레이스가 쪼개져
+                # 있으면 0V 광전류를 지우지 않도록 평행이동으로 대체한다.
+                if label == "Dark":
+                    _zero_anchor(out, ks)
+                else:
+                    _stitch_group(out, ks, "shift", c["stitch_span"])
+            else:
                 _stitch_group(out, ks, c["stitch_mode"], c["stitch_span"])
 
     return [(v, i) for v, i in out]

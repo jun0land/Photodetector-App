@@ -187,24 +187,38 @@ def _postproc(ctx) -> None:
             index=modes.index(cur_m) if cur_m in modes else 0,
             format_func=lambda k: postproc.STITCH_MODES[k],
             key=state.wkey("postproc", "stitch_mode", fid=fid),
-            help="**평행이동** — 조각 전체를 옮겨 단차만 없앱니다. 모양이 그대로 보존되는 "
-                 "대신 접합부 기울기 차이(꺾임)는 남습니다.\n\n"
-                 "**테이퍼** — 이동량을 접합부에서만 100%, 지정 반경 밖에서 0 으로 "
-                 "줄입니다. 먼 쪽 끝값이 원본 그대로 남습니다.\n\n"
-                 "**블렌드** — 평행이동 후 접합부 구간을 양쪽 공통 직선으로 섞어 "
-                 "기울기까지 잇습니다. 가장 매끄럽지만 **그 구간 값은 합성값**입니다.",
+            help="**영점 정렬** — 조각마다 자기 0V 값을 뺍니다. 0 바이어스 암전류는 0 "
+                 "이어야 하므로 물리적으로도 맞고, **골짜기가 양쪽 모두 정확히 0V 에 "
+                 "섭니다.** (광 트레이스가 쪼개져 있으면 0V 광전류를 지우지 않도록 "
+                 "평행이동으로 대체합니다.)\n\n"
+                 "**평행이동** — 조각 전체를 옮겨 단차만 없앱니다. 모양은 보존되지만 "
+                 "⚠️ **0 교차점도 같이 밀려 골짜기가 옆으로 이동**합니다.\n\n"
+                 "**테이퍼** — 이동량을 접합부에서만 100%, 반경 밖에서 0 으로 줄입니다. "
+                 "골짜기는 제자리지만 반경이 좁으면 급하게 꺾입니다.\n\n"
+                 "**블렌드** — 평행이동 후 접합부를 공통 직선으로 섞어 기울기까지 "
+                 "잇습니다. 가장 매끄럽지만 **그 구간은 합성값**이고 골짜기도 밀립니다.",
         )
+        if p["stitch_mode"] in ("shift", "blend"):
+            st.caption("⚠️ 이 방식은 조각을 통째로 옮기므로 0 교차점(골짜기)도 함께 "
+                       "이동합니다. 골짜기를 0V 에 두려면 **영점 정렬**을 쓰세요.")
         if p["stitch_mode"] != "shift":
             p["stitch_span"] = st.number_input(
                 "접합부 반경 (V)",
                 min_value=postproc.SPAN_MIN, max_value=postproc.SPAN_MAX,
-                value=float(p.get("stitch_span", 0.05)), step=0.005, format="%.3f",
+                value=float(p.get("stitch_span", 0.5)), step=0.05, format="%.3f",
                 key=state.wkey("postproc", "stitch_span", fid=fid),
-                help="접합부 좌우 이 범위만 손댑니다. 좁을수록 원본에 가깝고, "
-                     "넓을수록 매끄럽습니다.",
+                help="접합부 좌우 이 범위만 손댑니다. 좁을수록 원본에 가깝지만 "
+                     "급하게 꺾이고, 넓을수록 매끄럽습니다.",
             )
+            # 좁으면 왜 어색한지 감이 안 오므로, 더해지는 기울기를 숫자로 보여준다.
+            r = postproc.taper_slope_ratio(ctx.parsed, float(p["stitch_span"]))
+            if r is not None:
+                verdict = ("자연스러움" if r <= 0.2 else
+                           "다소 꺾임" if r <= 0.5 else "급격히 꺾임 — 반경을 넓히세요")
+                st.caption(
+                    f"접합부에 더해지는 기울기 = 데이터 자체의 **{r * 100:.0f}%** → {verdict}")
         if p["stitch_mode"] == "blend":
-            st.warning(f"접합부 ±{p.get('stitch_span', 0.05):g}V 구간은 **합성값**입니다. "
+            st.warning(f"접합부 ±{p.get('stitch_span', 0.5):g}V 구간은 **합성값**입니다. "
                        "원본은 엑셀 `Raw` 시트에 그대로 남습니다.", icon="⚠️")
 
     st.markdown("---")

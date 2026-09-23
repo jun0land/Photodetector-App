@@ -137,8 +137,12 @@ DEFAULTS = {
     # 성능지표(R·D*)는 이 설정과 무관하게 항상 raw 로 계산한다.
     "postproc": {
         "stitch": False,     # 같은 라벨의 분할 측정(Dark 0→-1V / 0→+1V)을 이어 붙임
-        "stitch_mode": "shift",   # shift | taper | blend
-        "stitch_span": 0.05,      # taper·blend 가 손대는 접합부 반경 (V)
+        # zero = 조각별로 자기 0V 값을 빼 골짜기를 0V 에 세운다 (암전류 기본).
+        # shift·blend 는 0 교차점까지 같이 밀리므로 골짜기가 옆으로 이동한다.
+        "stitch_mode": "zero",    # zero | shift | taper | blend
+        # 0.05V 면 더해지는 기울기가 데이터 자체의 124~132% 라 급하게 꺾인다.
+        # 0.5V 면 12~13% 로 자연스럽다 (postproc.taper_slope_ratio 로 실측).
+        "stitch_span": 0.5,       # taper·blend 가 손대는 접합부 반경 (V)
         "smooth": "none",    # none | movavg | savgol
         "window": 7,         # 창 크기(점 개수, 홀수)
         "poly": 2,           # savgol 다항 차수
